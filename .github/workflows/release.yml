@@ -68,7 +68,7 @@ jobs:
           git add deploy/portainer-compose.yml
           git commit -m "deploy: ${TAG} [skip ci]"
           # Another push may have landed while the image built; the bump only touches one line.
-          for attempt in 1 2 3; do
+          for _ in 1 2 3; do
             git pull --rebase origin main && git push origin HEAD:main && exit 0
             sleep 5
           done
