@@ -1,0 +1,12 @@
+.env
+.venv/
+__pycache__/
+*.pyc
+.pytest_cache/
+.ruff_cache/
+node_modules/
+web/dist/
+*.tsbuildinfo
+# Test files dropped here for the dev stack (EICAR etc.) stay out of git.
+samples/*
+!samples/README.txt
