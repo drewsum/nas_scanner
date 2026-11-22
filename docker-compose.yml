@@ -1,0 +1,92 @@
+# Dev stack. Run locally with `docker compose up --build`; see README.
+# All settings come from .env (copy .env.example).
+
+x-app: &app
+  build: .
+  env_file: .env
+  environment:
+    NASSCAN_DATABASE_URL: postgresql+psycopg://${POSTGRES_USER}:${POSTGRES_PASSWORD}@db:5432/${POSTGRES_DB}
+  restart: unless-stopped
+
+services:
+  db:
+    image: postgres:16
+    env_file: .env
+    volumes:
+      - db-data:/var/lib/postgresql/data
+    ports:
+      - "127.0.0.1:${NASSCAN_DB_PUBLISH_PORT:-5434}:5432"
+    healthcheck:
+      # Over TCP: during first-run init, Postgres listens only on its socket.
+      test: ["CMD-SHELL", "pg_isready -h 127.0.0.1 -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+      start_period: 2m
+    restart: unless-stopped
+
+  migrate:
+    <<: *app
+    command: ["nasscan", "migrate"]
+    restart: "no"
+    depends_on:
+      db:
+        condition: service_healthy
+
+  api:
+    <<: *app
+    command: ["nasscan", "api"]
+    ports:
+      - "${NASSCAN_API_PUBLISH_PORT:-8000}:8000"
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/api/health', timeout=3)"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+
+  scanner:
+    <<: *app
+    command: ["nasscan", "scanner"]
+    volumes:
+      - ${NASSCAN_SCAN_ROOT:-./samples}:/scan:ro
+    healthcheck:
+      test: ["CMD", "python", "-c", "import os, sys, time; sys.exit(time.time() - os.path.getmtime('/tmp/nasscan-scanner-heartbeat') > 60)"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+
+  # ClamAV daemon; the scanner sends it paths under /scan, so it mounts the same folder at the
+  # same place. First start downloads the signatures (a few minutes, ~1 GB of RAM or more).
+  clamd:
+    image: clamav/clamav:1.4
+    volumes:
+      - ${NASSCAN_SCAN_ROOT:-./samples}:/scan:ro
+      - clamav-db:/var/lib/clamav
+    restart: unless-stopped
+
+  web:
+    image: node:24-slim
+    working_dir: /web
+    command: ["sh", "-c", "npm ci && npm run dev"]
+    environment:
+      NASSCAN_API_PROXY: http://api:8000
+      VITE_POLL: "1"
+    volumes:
+      - ./web:/web
+      - web-node-modules:/web/node_modules
+    ports:
+      - "${NASSCAN_WEB_PUBLISH_PORT:-5173}:5173"
+    depends_on:
+      api:
+        condition: service_healthy
+
+volumes:
+  db-data:
+  clamav-db:
+  web-node-modules:

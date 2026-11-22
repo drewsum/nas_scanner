@@ -1,0 +1,9 @@
+# Builds nasscan:local from this checkout, for running the server stack with plain
+# `docker compose` on the host instead of pulling from GHCR (docs/deploy-truenas.md):
+#   NASSCAN_IMAGE=nasscan:local docker compose -f deploy/portainer-compose.yml -f deploy/compose.build.yml up -d --build
+# Every app service shares the image, so only migrate builds it; the rest wait for it.
+services:
+  migrate:
+    image: ${NASSCAN_IMAGE:-nasscan:local}
+    build:
+      context: ..

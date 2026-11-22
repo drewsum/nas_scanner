@@ -1,0 +1,75 @@
+# GitOps: every push to main builds the image, pushes it to GHCR, and commits the new tag into
+# deploy/portainer-compose.yml. Portainer polls the repo and redeploys on that commit, so it
+# never redeploys onto an image that doesn't exist yet.
+#
+# No loops: the tag bump is pushed with GITHUB_TOKEN (whose pushes never trigger workflows),
+# says [skip ci], and runs by github-actions[bot] are skipped anyway.
+name: release
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  packages: write
+
+concurrency:
+  group: release
+  cancel-in-progress: false
+
+env:
+  IMAGE: ghcr.io/drewsum/nas_scanner
+
+jobs:
+  checks:
+    if: github.actor != 'github-actions[bot]'
+    uses: ./.github/workflows/ci.yml
+    with:
+      skip_image: true
+
+  publish:
+    needs: checks
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - id: tag
+        run: echo "tag=sha-${GITHUB_SHA::7}" >> "$GITHUB_OUTPUT"
+      - uses: docker/setup-buildx-action@v3
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - uses: docker/build-push-action@v6
+        with:
+          context: .
+          platforms: linux/amd64
+          push: true
+          build-args: GIT_SHA=${{ steps.tag.outputs.tag }}
+          tags: |
+            ${{ env.IMAGE }}:${{ steps.tag.outputs.tag }}
+            ${{ env.IMAGE }}:latest
+          labels: |
+            org.opencontainers.image.source=https://github.com/${{ github.repository }}
+            org.opencontainers.image.revision=${{ github.sha }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Point the deploy stack at the new image
+        env:
+          TAG: ${{ steps.tag.outputs.tag }}
+        run: |
+          sed -i -E "s#(ghcr\.io/drewsum/nas_scanner):[A-Za-z0-9._-]+#\1:${TAG}#" deploy/portainer-compose.yml
+          grep -q "nas_scanner:${TAG}" deploy/portainer-compose.yml
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add deploy/portainer-compose.yml
+          git commit -m "deploy: ${TAG} [skip ci]"
+          # Another push may have landed while the image built; the bump only touches one line.
+          for _ in 1 2 3; do
+            git pull --rebase origin main && git push origin HEAD:main && exit 0
+            sleep 5
+          done
+          exit 1
