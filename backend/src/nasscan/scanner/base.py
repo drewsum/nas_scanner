@@ -5,6 +5,7 @@ the scanner runs on its own interval. Sources decide from settings whether they'
 enabled, so a missing env var disables a source instead of crashing the scanner.
 """
 
+import threading
 from abc import ABC, abstractmethod
 
 from nasscan.config import Settings
@@ -16,6 +17,8 @@ class Source(ABC):
 
     def __init__(self, settings: Settings) -> None:
         self.settings = settings
+        # Set when the scanner is shutting down, for work running in threads.
+        self.stopping = threading.Event()
 
     def enabled(self) -> bool:
         return True

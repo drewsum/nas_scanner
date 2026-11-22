@@ -2,6 +2,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useState } from "react";
 import { api, UNAUTHORIZED_EVENT } from "./api";
 import { Login } from "./Login";
+import { RunsPanel } from "./Runs";
 
 // Pages register here as milestones land (M5: dashboard, runs, findings, files, providers).
 const NAV: [string, string][] = [["#/", "Dashboard"]];
@@ -20,15 +21,7 @@ function useHash(): string {
 }
 
 function Dashboard() {
-  return (
-    <section className="card">
-      <h2>No scans yet</h2>
-      <p className="muted">
-        The file inventory and scanning engines arrive in the next milestones. The scanner
-        container is running its nightly and weekly schedules.
-      </p>
-    </section>
-  );
+  return <RunsPanel />;
 }
 
 export function App() {

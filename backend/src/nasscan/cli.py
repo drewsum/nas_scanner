@@ -39,6 +39,19 @@ def cmd_scanner(_: argparse.Namespace) -> None:
     asyncio.run(run(get_settings()))
 
 
+def cmd_scan(args: argparse.Namespace) -> None:
+    from nasscan.db import get_sessionmaker
+    from nasscan.scanner.runs import ScanBusyError, enqueue
+
+    kind = "path" if args.path else ("full" if args.full else "incremental")
+    with get_sessionmaker()() as session:
+        try:
+            run = enqueue(session, kind, "manual", args.path or "")
+        except (ScanBusyError, ValueError) as exc:
+            raise SystemExit(str(exc)) from exc
+    print(f"Queued {run.kind} scan {run.id}; the scanner starts it within seconds.")
+
+
 def cmd_backup(args: argparse.Namespace) -> None:
     from nasscan.backup import run_backups
 
@@ -75,6 +88,11 @@ def main(argv: list[str] | None = None) -> None:
     sub.add_parser("scanner", help="run the scan scheduler and workers").set_defaults(
         func=cmd_scanner
     )
+    scan_p = sub.add_parser("scan", help="queue a scan now (the scanner container runs it)")
+    group = scan_p.add_mutually_exclusive_group()
+    group.add_argument("--full", action="store_true", help="read every file, not just changes")
+    group.add_argument("--path", help="read every file under this folder (relative to /scan)")
+    scan_p.set_defaults(func=cmd_scan)
     backup_p = sub.add_parser(
         "backup", help="dump the database to NASSCAN_BACKUP_DIR on a schedule"
     )

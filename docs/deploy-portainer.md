@@ -74,6 +74,27 @@ Same as `.env.example`, plus:
 Set `NASSCAN_ADMIN_PASSWORD` on the server: without it the UI and API are open to anyone on the
 LAN, and the UI warns about it. Changing it logs everyone out.
 
+## Scans
+
+- **Schedule.** `NASSCAN_INCREMENTAL_CRON` (default 02:00 nightly) reads new and changed files;
+  `NASSCAN_FULL_CRON` (default 03:00 Sunday) reads every file. A file counts as changed when its
+  size, modification time or inode differ from the last scan. Only one scan runs at a time: a
+  scan that comes due while another is running is skipped. A full scan that's queued replaces a
+  queued incremental one.
+- **What's skipped.** `NASSCAN_EXCLUDE_GLOBS`: a name without a slash (`.zfs`, `ix-apps`) is
+  skipped wherever it appears, and a pattern with a slash (`apps/nas_scanner`) matches a path
+  under the scan root. If the app's own dataset is under the scan root, add it. Symlinks are
+  never followed.
+- **Load on the NAS.** `NASSCAN_MAX_READ_MBPS` (default 100) caps how fast the scanner reads, and
+  `NASSCAN_SCAN_WORKERS` (default 2) how many files it reads at once. The scanner also runs at
+  low CPU and IO priority. The read cap is what matters most on ZFS.
+- **Restarts.** A scan interrupted by a redeploy or a reboot resumes where it stopped.
+- **Removed files.** Files no longer found are marked removed. Nothing is marked removed when
+  the scan root is empty (an unmounted dataset), and files under folders that couldn't be read
+  are left alone.
+- **Scan now.** Use the buttons on the dashboard, or
+  `docker exec <scanner container> nasscan scan [--full | --path some/folder]`.
+
 ## Rolling back
 
 Either revert the offending commit on `main` (a new image is built and deployed), or set

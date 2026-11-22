@@ -8,12 +8,14 @@ from pathlib import Path
 
 from nasscan.config import Settings
 from nasscan.scanner.base import Source
+from nasscan.scanner.priority import lower_priority
+from nasscan.scanner.runner import ScanRunnerSource
 from nasscan.scanner.schedule import ScheduleSource, next_run
 
 log = logging.getLogger(__name__)
 
 # Background tasks register here as milestones land (M1 crawler, M2 engines, M3 feeds, ...).
-SOURCE_TYPES: list[type[Source]] = [ScheduleSource]
+SOURCE_TYPES: list[type[Source]] = [ScheduleSource, ScanRunnerSource]
 
 
 async def _loop(source: Source, stop: asyncio.Event) -> None:
@@ -43,11 +45,20 @@ async def _heartbeat(settings: Settings, stop: asyncio.Event) -> None:
 
 
 async def run(settings: Settings) -> None:
+    # Before any thread starts, so the scan workers inherit it.
+    lower_priority(settings)
+    sources = [cls(settings) for cls in SOURCE_TYPES]
     stop = asyncio.Event()
+
+    def shutdown() -> None:
+        stop.set()
+        for s in sources:
+            s.stopping.set()
+
     loop = asyncio.get_running_loop()
     for sig in (signal.SIGINT, signal.SIGTERM):
         with contextlib.suppress(NotImplementedError):  # Windows
-            loop.add_signal_handler(sig, stop.set)
+            loop.add_signal_handler(sig, shutdown)
 
     now = datetime.now().astimezone()
     log.info(
@@ -55,7 +66,6 @@ async def run(settings: Settings) -> None:
         next_run(settings.incremental_cron, now).isoformat(timespec="minutes"),
         next_run(settings.full_cron, now).isoformat(timespec="minutes"),
     )
-    sources = [cls(settings) for cls in SOURCE_TYPES]
     active = [s for s in sources if s.enabled()]
     for s in sources:
         log.info("source %s: %s", s.name, "enabled" if s in active else "disabled")

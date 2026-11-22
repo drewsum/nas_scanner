@@ -6,7 +6,9 @@ from datetime import datetime
 from croniter import croniter
 
 from nasscan.config import Settings
+from nasscan.db import get_sessionmaker
 from nasscan.scanner.base import Source
+from nasscan.scanner.runs import ScanBusyError, enqueue
 
 log = logging.getLogger(__name__)
 
@@ -29,8 +31,8 @@ def due_kind(settings: Settings, last_check: datetime, now: datetime) -> str | N
 
 
 class ScheduleSource(Source):
-    """Starts scans when their cron time passes. Scans themselves arrive in M1; until then
-    a due scan is only logged."""
+    """Queues a scan when its cron time passes. If one is still running, the due scan is
+    skipped (and logged): a full scan running past the next night covers it anyway."""
 
     name = "schedule"
     interval_seconds = 30.0
@@ -44,4 +46,9 @@ class ScheduleSource(Source):
         kind = due_kind(self.settings, self._last_check, now)
         self._last_check = now
         if kind:
-            log.info("%s scan due (scanning arrives in M1)", kind)
+            with get_sessionmaker()() as session:
+                try:
+                    run = enqueue(session, kind, "schedule")
+                    log.info("queued %s scan %d", kind, run.id)
+                except ScanBusyError as exc:
+                    log.info("%s scan due but skipped: %s", kind, exc)
