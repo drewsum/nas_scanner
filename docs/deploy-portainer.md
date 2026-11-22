@@ -67,7 +67,7 @@ Same as `.env.example`, plus:
 |---|---|
 | `NASSCAN_DATA_DIR` | Host path of the app dataset (DB in `<this>/db`, backups in `<this>/backups`). Required. |
 | `NASSCAN_SCAN_ROOT` | Host path to scan, mounted read-only at `/scan`. Required. |
-| `NASSCAN_API_PUBLISH_PORT` | Host port for the API and UI (default 8000). Pick one no other app uses. |
+| `NASSCAN_API_PUBLISH_PORT` | Host port for the API and UI (default 8010; network_mapper uses 8000). Pick one no other app uses. |
 | `NASSCAN_IMAGE` | Override the image (e.g. pin an older `sha-` tag to roll back). Normally unset. |
 | `NASSCAN_APP_MEMORY_LIMIT` / `NASSCAN_DB_MEMORY_LIMIT` | Memory limits per container (default `1g` / `1g`). |
 
