@@ -16,13 +16,13 @@ Work is tracked as [milestones and issues](https://github.com/drewsum/nas_scanne
 
 ```bash
 cp .env.example .env          # fill in; NASSCAN_SCAN_ROOT=./samples for dev
-docker compose up --build     # db, migrate, api :8000, scanner, clamd, Vite :5173
+docker compose up --build     # db, migrate, api :8010, scanner, clamd, Vite :5173
 bash scripts/test.sh          # ruff, pytest (incl. DB tests), web lint + build
 uvx pre-commit install        # the same checks before each commit
 ```
 
 The Vite dev server on :5173 proxies `/api` to the api container. The api container also serves
-the built UI on :8000.
+the built UI on :8010.
 
 ## Deployment (GitOps)
 
