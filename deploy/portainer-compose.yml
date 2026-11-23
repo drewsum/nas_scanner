@@ -67,7 +67,7 @@ x-logging: &logging
 # read-only filesystem; only /tmp (and the volumes below) can be written.
 x-app: &app
   # Rewritten by .github/workflows/release.yml on every push to main; keep it on one line.
-  image: ${NASSCAN_IMAGE:-ghcr.io/drewsum/nas_scanner:sha-cf8eb72}
+  image: ${NASSCAN_IMAGE:-ghcr.io/drewsum/nas_scanner:sha-a6ea62f}
   environment: *nasscan-env
   restart: unless-stopped
   logging: *logging
