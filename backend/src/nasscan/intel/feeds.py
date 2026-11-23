@@ -9,6 +9,8 @@ import csv
 import io
 import logging
 import re
+import threading
+import time
 import zipfile
 from collections.abc import Iterator
 from dataclasses import dataclass
@@ -71,6 +73,10 @@ class Feed:
     def after_import(self, state: dict, download: Download) -> None:
         """Remember what was imported (in the provider's details)."""
 
+    def fallback(self, download: Download) -> Download | None:
+        """Something smaller to fetch when ``download`` fails."""
+        return None
+
 
 class MalwareBazaarFeed(Feed):
     name = "malwarebazaar-feed"
@@ -91,6 +97,12 @@ class MalwareBazaarFeed(Feed):
     def after_import(self, state: dict, download: Download) -> None:
         if download.replace:
             state["last_full"] = datetime.now(UTC).isoformat()
+
+    def fallback(self, download: Download) -> Download | None:
+        """The full export failed: take the last 48 hours now, the full one next time."""
+        if not download.replace:
+            return None
+        return Download(self.base.format(key=self.abusech_key) + "recent.csv", False, "recent.csv")
 
 
 class ThreatFoxFeed(Feed):
@@ -181,8 +193,35 @@ def feed_listed(settings: Settings, feed: Feed) -> bool:
 # --- download and parse ---------------------------------------------------------------------
 
 
-def fetch(client: httpx.Client, download: Download, dest: Path) -> Path:
-    """Stream a download to ``dest``."""
+def fetch(
+    client: httpx.Client,
+    download: Download,
+    dest: Path,
+    attempts: int = 3,
+    wait: float = 10.0,
+    stop: threading.Event | None = None,
+) -> Path:
+    """Stream a download to ``dest``. Dropped connections (big exports get cut off now and
+    then) are retried from the start; HTTP errors are not."""
+    for attempt in range(1, attempts + 1):
+        try:
+            return _fetch_once(client, download, dest)
+        except _Interrupted as exc:
+            if attempt == attempts:
+                raise FeedError(f"{download.label}: {exc} (tried {attempts} times)") from exc
+            log.info("%s: %s; retrying (%d/%d)", download.label, exc, attempt, attempts)
+            if stop is not None and stop.wait(wait * attempt):
+                raise FeedError(f"{download.label}: stopped") from exc
+            if stop is None:
+                time.sleep(wait * attempt)
+    raise AssertionError("unreachable")
+
+
+class _Interrupted(Exception):
+    pass
+
+
+def _fetch_once(client: httpx.Client, download: Download, dest: Path) -> Path:
     dest.parent.mkdir(parents=True, exist_ok=True)
     total = 0
     try:
@@ -198,7 +237,8 @@ def fetch(client: httpx.Client, download: Download, dest: Path) -> Path:
                         raise FeedError(f"{download.label}: bigger than 4 GB")
                     out.write(chunk)
     except httpx.HTTPError as exc:
-        raise FeedError(f"{download.label}: {type(exc).__name__}: {exc}") from exc
+        # The message never holds the URL (and so never a key in it).
+        raise _Interrupted(f"{type(exc).__name__}: {exc}") from exc
     return dest
 
 

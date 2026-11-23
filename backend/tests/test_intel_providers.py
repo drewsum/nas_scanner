@@ -457,3 +457,45 @@ def finding(engine, severity, name="x", description=""):
 )
 def test_priority(ext, mime, findings, expected):
     assert prio.priority_for(ext, mime, findings) == expected
+
+
+def test_dropped_downloads_are_retried(tmp_path):
+    from nasscan.intel.feeds import Download, FeedError, fetch
+
+    calls = []
+
+    def handler(request):
+        calls.append(1)
+        if len(calls) < 3:
+            raise httpx.RemoteProtocolError("peer closed connection", request=request)
+        return httpx.Response(200, content=b"hashes")
+
+    c, _ = client(handler)
+    d = Download("https://example.com/k/full.csv.zip", True, "full.csv.zip")
+    assert fetch(c, d, tmp_path / "f", wait=0).read_bytes() == b"hashes"
+    assert len(calls) == 3
+    calls.clear()
+    c, _ = client(lambda r: (_ for _ in ()).throw(httpx.RemoteProtocolError("cut", request=r)))
+    with pytest.raises(FeedError, match="tried 3 times") as err:
+        fetch(c, d, tmp_path / "f", wait=0)
+    assert "example.com" not in str(err.value)  # never the URL, which may hold a key
+    c, _ = client(lambda r: httpx.Response(404))
+    with pytest.raises(FeedError, match="HTTP 404"):
+        fetch(c, d, tmp_path / "f", wait=0)
+
+
+def test_malwarebazaar_falls_back_to_recent(monkeypatch):
+    feed = MalwareBazaarFeed(settings(monkeypatch, abusech_auth_key="KEY"))
+    (full,) = feed.downloads({}, httpx.Client())
+    smaller = feed.fallback(full)
+    assert smaller.label == "recent.csv" and not smaller.replace
+    assert feed.fallback(smaller) is None
+
+
+def test_http_request_logs_are_quiet():
+    import logging
+
+    from nasscan.cli import quiet_http_logs
+
+    quiet_http_logs()
+    assert not logging.getLogger("httpx").isEnabledFor(logging.INFO)
