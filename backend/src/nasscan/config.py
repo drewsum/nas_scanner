@@ -112,6 +112,16 @@ class Settings(BaseSettings):
     otx_api_key: SecretStr | None = None
     opentip_api_key: SecretStr | None = None
 
+    # Verdicts (docs/verdicts.md). Each engine or provider adds the points of its most severe
+    # detection (malicious 100, suspicious 40, info 5) times its weight; the total makes a
+    # file suspicious or malicious. Weights default to 1, e.g. "heuristics=0.5,virustotal=1.5".
+    verdict_weights: str = ""
+    verdict_suspicious_score: int = Field(default=40, ge=1)
+    verdict_malicious_score: int = Field(default=100, ge=1)
+    # Hashes a known-good list (NSRL via CIRCL) holds, with no malicious detection, have their
+    # score multiplied by this (1: no effect).
+    verdict_known_good_factor: float = Field(default=0.5, ge=0, le=1)
+
     # Password for the web UI and API. Unset leaves both open to anyone on the LAN.
     admin_password: SecretStr | None = None
     session_days: float = Field(default=30.0, gt=0)
@@ -187,6 +197,29 @@ class Settings(BaseSettings):
             except ValueError:
                 continue
         return out
+
+    @property
+    def verdict_weight_overrides(self) -> dict[str, float]:
+        out: dict[str, float] = {}
+        for part in self.verdict_weights.split(","):
+            name, sep, value = part.partition("=")
+            if not sep or not name.strip():
+                continue
+            try:
+                weight = float(value)
+            except ValueError:
+                continue
+            if weight >= 0:
+                out[name.strip().lower()] = weight
+        return out
+
+    @field_validator("verdict_malicious_score")
+    @classmethod
+    def _malicious_above_suspicious(cls, value: int, info) -> int:
+        suspicious = info.data.get("verdict_suspicious_score")
+        if suspicious is not None and value < suspicious:
+            raise ValueError("verdict_malicious_score must be at least verdict_suspicious_score")
+        return value
 
     @property
     def exclude_patterns(self) -> list[str]:

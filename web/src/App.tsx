@@ -2,7 +2,8 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useState } from "react";
 import { api, UNAUTHORIZED_EVENT } from "./api";
 import { Login } from "./Login";
-import { DetectionsPanel, EnginesPanel, IntelPanel } from "./Engines";
+import { EnginesPanel, IntelPanel } from "./Engines";
+import { AllowlistPanel, FindingsPanel } from "./Findings";
 import { RunsPanel } from "./Runs";
 
 // Pages register here as milestones land (M5: dashboard, runs, findings, files, providers).
@@ -24,10 +25,11 @@ function useHash(): string {
 function Dashboard() {
   return (
     <div className="stack">
-      <DetectionsPanel />
+      <FindingsPanel />
       <RunsPanel />
       <EnginesPanel />
       <IntelPanel />
+      <AllowlistPanel />
     </div>
   );
 }

@@ -105,6 +105,7 @@ class File(Base):
             postgresql_where=text("intel_checked_at IS NULL AND status = 'active'"),
         ),
         Index("files_intel_candidates", "sha256", postgresql_where=text("intel_priority > 0")),
+        Index("files_verdict_pending", "id", postgresql_where=text("verdict_pending")),
     )
 
     id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
@@ -142,6 +143,9 @@ class File(Base):
     # When feed matches and cached lookups were last applied to it; cleared when the content
     # changes.
     intel_checked_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    # Its verdict needs working out again. Set by database triggers whenever its detections,
+    # status or content change, so every writer is covered; cleared by nasscan.findings.
+    verdict_pending: Mapped[bool] = mapped_column(Boolean, default=False)
 
 
 # How sure an engine is: info (worth knowing), suspicious, malicious.
@@ -248,3 +252,60 @@ class IntelProvider(Base):
     entries: Mapped[int] = mapped_column(BigInteger, default=0)
     details: Mapped[dict | None] = mapped_column(JSONB)
     updated_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
+
+# A file's overall verdict, from all its detections (nasscan.verdict).
+FILE_VERDICTS = ("clean", "suspicious", "malicious")
+# open: needs a look. acknowledged: seen, keep it listed, don't alert again. ignored: a false
+# positive for this content. allowlisted: matches an allowlist entry. resolved: the file is
+# gone or came back clean. Only the first three are set by hand.
+FINDING_STATUSES = ("open", "acknowledged", "ignored", "allowlisted", "resolved")
+TRIAGE_STATUSES = ("open", "acknowledged", "ignored")
+
+
+class Finding(Base):
+    """One file judged suspicious or malicious, kept after it resolves for the history."""
+
+    __tablename__ = "findings"
+    __table_args__ = (Index("findings_status", "status", "verdict"),)
+
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
+    file_id: Mapped[int] = mapped_column(
+        BigInteger, ForeignKey("files.id", ondelete="CASCADE"), unique=True
+    )
+    # The content judged; a different hash later means new content, and triage starts over.
+    sha256: Mapped[str | None] = mapped_column(String(64))
+    verdict: Mapped[str] = mapped_column(String(16))
+    score: Mapped[int] = mapped_column(Integer)
+    # Every detection behind it, with the points each engine contributed.
+    evidence: Mapped[list] = mapped_column(JSONB)
+    status: Mapped[str] = mapped_column(String(16), default="open")
+    # removed | clean, when resolved.
+    resolution: Mapped[str | None] = mapped_column(String(16))
+    note: Mapped[str | None] = mapped_column(Text)
+    first_seen: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    # Last evaluated as suspicious or malicious.
+    last_seen: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    # When it last became open (new, reopened, or escalated): what alerts key on.
+    opened_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    status_changed_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    verdict_changed_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    resolved_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+
+
+ALLOWLIST_KINDS = ("sha256", "path")
+
+
+class AllowlistEntry(Base):
+    """Content (by SHA-256) or paths (by glob) never to raise a finding."""
+
+    __tablename__ = "allowlist"
+    __table_args__ = (Index("allowlist_unique", "kind", "value", unique=True),)
+
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
+    kind: Mapped[str] = mapped_column(String(16))
+    # A lowercase SHA-256, or a glob relative to the scan root where * also matches /.
+    value: Mapped[str] = mapped_column(Text)
+    note: Mapped[str | None] = mapped_column(Text)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())

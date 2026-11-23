@@ -7,6 +7,7 @@ from datetime import datetime
 from pathlib import Path
 
 from nasscan.config import Settings
+from nasscan.findings import VerdictSource
 from nasscan.intel.sources import intel_sources
 from nasscan.scanner.base import Source
 from nasscan.scanner.priority import lower_priority
@@ -22,6 +23,7 @@ SOURCE_TYPES: list[type[Source]] = [
     ScanRunnerSource,
     YaraUpdateSource,
     EngineStatusSource,
+    VerdictSource,
 ]
 
 
