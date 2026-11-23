@@ -5,8 +5,9 @@ local engines (ClamAV, YARA, file-type heuristics), matches every hash against d
 malware hash feeds (MalwareBazaar, ThreatFox, VirusShare), and looks up the hashes of risky files
 with free threat-intel services (CIRCL, Team Cymru, VirusTotal, MalwareBazaar, YARAify, Hybrid
 Analysis, MetaDefender, OTX, Kaspersky OpenTIP). Only hashes ever leave the NAS, never file contents. The NAS data is
-mounted read-only: the scanner reports and never changes, moves or deletes a file. Findings show
-in a web UI, in reports, and by email.
+mounted read-only: the scanner reports and never changes, moves or deletes a file. All the
+evidence about a file adds up to one verdict ([how](docs/verdicts.md)); findings show in a web UI,
+in reports, and by email, and can be acknowledged, ignored or allowlisted.
 
 Built the same way as [network_mapper](https://github.com/drewsum/network_mapper): Python 3.12
 (FastAPI, SQLAlchemy, Alembic) with uv, PostgreSQL, and a React + Vite UI, all in one image

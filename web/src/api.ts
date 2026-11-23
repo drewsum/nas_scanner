@@ -52,19 +52,52 @@ export interface EngineStatus {
 
 export type Severity = "info" | "suspicious" | "malicious";
 
-export interface Detection {
-  id: number;
-  file_id: number;
-  path: string;
-  file_status: string;
+export type Verdict = "suspicious" | "malicious";
+export type FindingStatus = "open" | "acknowledged" | "ignored" | "allowlisted" | "resolved";
+export type FindingFilter = "active" | "ignored" | "allowlisted" | "resolved" | "all";
+
+export interface EvidenceItem {
   engine: string;
   name: string;
   member: string;
   severity: Severity;
   description: string | null;
-  details: Record<string, unknown> | null;
+  link: string | null;
+  points: number;
+}
+
+export interface Finding {
+  id: number;
+  file_id: number;
+  path: string;
+  file_status: string;
+  size: number;
+  mime: string | null;
+  sha256: string | null;
+  verdict: Verdict;
+  score: number;
+  status: FindingStatus;
+  resolution: string | null;
+  note: string | null;
+  evidence: EvidenceItem[];
   first_seen: string;
   last_seen: string;
+  opened_at: string;
+  status_changed_at: string;
+  resolved_at: string | null;
+}
+
+export interface FindingSummary {
+  counts: Partial<Record<FindingStatus, Partial<Record<Verdict, number>>>>;
+  pending: number;
+}
+
+export interface AllowlistEntry {
+  id: number;
+  kind: "sha256" | "path";
+  value: string;
+  note: string | null;
+  created_at: string;
 }
 
 /** Fired when the API answers 401, so the app can show the login page. */
@@ -118,6 +151,13 @@ export const api = {
   startRun: (kind: RunKind, path = "") => request<ScanRun>("POST", "/api/runs", { kind, path }),
   cancelRun: (id: number) => request<ScanRun>("POST", `/api/runs/${id}/cancel`),
   engines: () => get<EngineStatus[]>("/api/engines"),
-  detections: () => get<Detection[]>("/api/detections?limit=100"),
+  findings: (status: FindingFilter) => get<Finding[]>(`/api/findings?status=${status}`),
+  findingSummary: () => get<FindingSummary>("/api/findings/summary"),
+  setFindingStatus: (id: number, status: "open" | "acknowledged" | "ignored", note?: string) =>
+    request<Finding>("POST", `/api/findings/${id}/status`, { status, note }),
+  allowlist: () => get<AllowlistEntry[]>("/api/allowlist"),
+  addAllowlist: (kind: AllowlistEntry["kind"], value: string, note?: string) =>
+    request<AllowlistEntry>("POST", "/api/allowlist", { kind, value, note }),
+  deleteAllowlist: (id: number) => request<void>("DELETE", `/api/allowlist/${id}`),
   intel: () => get<IntelProvider[]>("/api/intel/providers"),
 };

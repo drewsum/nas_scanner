@@ -1,7 +1,7 @@
 import { useQuery } from "@tanstack/react-query";
-import { api, type Severity } from "./api";
+import { api } from "./api";
 
-const ENGINE_LABELS: Record<string, string> = {
+export const ENGINE_LABELS: Record<string, string> = {
   clamav: "ClamAV",
   yara: "YARA",
   heuristics: "Heuristics",
@@ -21,7 +21,7 @@ const ENGINE_LABELS: Record<string, string> = {
   opentip: "Kaspersky OpenTIP",
 };
 
-function ago(iso: string | null): string {
+export function ago(iso: string | null): string {
   if (!iso) return "never";
   const minutes = (Date.now() - new Date(iso).getTime()) / 60_000;
   if (minutes < 2) return "just now";
@@ -131,60 +131,6 @@ export function IntelPanel() {
           </ul>
         </details>
       )}
-    </section>
-  );
-}
-
-const SEVERITY_CLASS: Record<Severity, string> = {
-  malicious: "pill bad",
-  suspicious: "pill warn",
-  info: "pill muted-pill",
-};
-
-/** What the engines found, most severe first. Verdicts and triage come in M4. */
-export function DetectionsPanel() {
-  const detections = useQuery({ queryKey: ["detections"], queryFn: api.detections, refetchInterval: 60_000 });
-  if (!detections.data?.length) return null;
-  return (
-    <section className="card">
-      <h2>Detections</h2>
-      <table>
-        <thead>
-          <tr>
-            <th>Severity</th>
-            <th>File</th>
-            <th>Engine</th>
-            <th>What</th>
-            <th>Seen</th>
-          </tr>
-        </thead>
-        <tbody>
-          {detections.data.map((d) => (
-            <tr key={d.id}>
-              <td>
-                <span className={SEVERITY_CLASS[d.severity]}>{d.severity}</span>
-              </td>
-              <td className="mono wrap">
-                {d.path}
-                {d.member && <span className="muted"> → {d.member}</span>}
-              </td>
-              <td>{ENGINE_LABELS[d.engine] ?? d.engine}</td>
-              <td title={d.name}>
-                {d.description ?? d.name}
-                {typeof d.details?.link === "string" && (
-                  <>
-                    {" "}
-                    <a href={d.details.link} target="_blank" rel="noreferrer noopener">
-                      report
-                    </a>
-                  </>
-                )}
-              </td>
-              <td>{new Date(d.last_seen).toLocaleString()}</td>
-            </tr>
-          ))}
-        </tbody>
-      </table>
     </section>
   );
 }
