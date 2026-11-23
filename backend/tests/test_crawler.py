@@ -10,7 +10,7 @@ from sqlalchemy import select, text
 from nasscan.cli import main
 from nasscan.config import get_settings
 from nasscan.db import get_sessionmaker
-from nasscan.db.models import Detection, File, ScanRun
+from nasscan.db.models import Detection, File, ScanError, ScanRun
 from nasscan.scanner import crawler as crawler_mod
 from nasscan.scanner.crawler import Crawler, batches
 from nasscan.scanner.engines import Pipeline
@@ -188,9 +188,27 @@ def test_an_unreadable_file_is_recorded_as_an_error(scan_root, monkeypatch):
     assert run.status == "completed" and run.errors == 1 and "bad" in run.last_error
     bad = files()["bad"]
     assert bad.status == "error" and bad.error == "Permission denied" and bad.sha256 is None
+    with get_sessionmaker()() as s:
+        logged = [(e.path, e.message) for e in s.scalars(select(ScanError))]
+    assert logged == [("bad", "Permission denied")]
     monkeypatch.setattr(crawler_mod, "read_file", real)
     assert scan().files_changed == 1  # retried next time
     assert files()["bad"].status == "active"
+
+
+def test_a_run_keeps_its_first_errors(scan_root, monkeypatch):
+    for i in range(5):
+        put(scan_root, f"bad{i}")
+    monkeypatch.setattr(crawler_mod, "MAX_SAVED_ERRORS", 3)
+
+    def broken(path, *args, **kwargs):
+        raise PermissionError(13, "Permission denied")
+
+    monkeypatch.setattr(crawler_mod, "read_file", broken)
+    run = scan()
+    with get_sessionmaker()() as s:
+        assert len(list(s.scalars(select(ScanError)))) == 3
+    assert run.errors == 5
 
 
 def test_an_interrupted_run_resumes_where_it_stopped(scan_root, monkeypatch):

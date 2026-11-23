@@ -24,7 +24,7 @@ from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.orm import Session, sessionmaker
 
 from nasscan.config import Settings
-from nasscan.db.models import Detection, File, ScanRun
+from nasscan.db.models import Detection, File, ScanError, ScanRun
 from nasscan.intel.priority import priority_for
 from nasscan.scanner.engines import LOCAL_ENGINE_NAMES, Pipeline, ScanResult
 from nasscan.scanner.engines.base import FileContext
@@ -63,6 +63,10 @@ class Scanned:
     priority: int = 0  # for live threat-intel lookups
 
 
+# Unreadable files and folders kept per run for its detail page.
+MAX_SAVED_ERRORS = 500
+
+
 @dataclass
 class Counts:
     seen: int = 0
@@ -80,10 +84,14 @@ class Counts:
     # Files each engine couldn't scan (clamd down, no rules yet), and the last reason.
     engine_errors: dict[str, int] = field(default_factory=dict)
     engine_last_error: dict[str, str] = field(default_factory=dict)
+    # Errors not yet written to scan_errors, and how many this execution has written.
+    unsaved: list[tuple[str, str]] = field(default_factory=list)
+    saved: int = 0
 
-    def error(self, message: str) -> None:
+    def error(self, path: str, message: str) -> None:
         self.errors += 1
-        self.last_error = message[:2000]
+        self.last_error = f"{path}: {message}"[:2000]
+        self.unsaved.append((path, message[:2000]))
 
 
 def batches(items: Iterable[FoundFile], size: int, max_bytes: int) -> Iterator[list[FoundFile]]:
@@ -203,7 +211,7 @@ class Crawler:
     def _found_files(self, root: str, counts: Counts) -> Iterator[FoundFile]:
         for item in walk(self.settings.scan_root, root, self.exclude):
             if isinstance(item, WalkError):
-                counts.error(f"{item.path}: {item.message}")
+                counts.error(item.path, item.message)
                 log.warning("can't read %s: %s", item.path or "/", item.message)
                 if item.is_dir:
                     if item.path == root:
@@ -263,7 +271,7 @@ class Crawler:
                 raise result
             if isinstance(result, Exception):
                 message = getattr(result, "strerror", None) or str(result)
-                counts.error(f"{item.path}: {message}")
+                counts.error(item.path, message)
                 self._upsert(session, run_id, item, None, now, error=message)
             else:
                 counts.hashed += 1
@@ -397,6 +405,18 @@ class Crawler:
     def _progress(self, session: Session, run_id: int, counts: Counts, current: str | None) -> None:
         """Totals so far: what the run had when this execution began, plus this execution."""
         base = self._base
+        if counts.unsaved:
+            # A run keeps its first MAX_SAVED_ERRORS; the count covers the rest.
+            room = max(0, MAX_SAVED_ERRORS - base.errors - counts.saved)
+            now = datetime.now(UTC)
+            rows = [
+                {"run_id": run_id, "path": path, "message": message, "at": now}
+                for path, message in counts.unsaved[:room]
+            ]
+            if rows:
+                session.execute(insert(ScanError), rows)
+            counts.saved += len(rows)
+            counts.unsaved.clear()
         session.execute(
             update(ScanRun)
             .where(ScanRun.id == run_id)

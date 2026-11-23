@@ -115,6 +115,7 @@ def list_findings(
         Query(),
     ] = "active",
     verdict: Annotated[Literal["suspicious", "malicious"] | None, Query()] = None,
+    q: Annotated[str | None, Query(max_length=1024, description="path contains")] = None,
     limit: Annotated[int, Query(ge=1, le=1000)] = 200,
 ) -> list[FindingOut]:
     """Malicious first, then highest score, then newest."""
@@ -123,6 +124,8 @@ def list_findings(
         stmt = stmt.where(Finding.status.in_(STATUS_GROUPS[status]))
     if verdict:
         stmt = stmt.where(Finding.verdict == verdict)
+    if q and q.strip():
+        stmt = stmt.where(File.path.icontains(q.strip(), autoescape=True))
     rows = db.execute(
         stmt.order_by(
             VERDICT_ORDER, Finding.score.desc(), Finding.opened_at.desc(), Finding.id.desc()
