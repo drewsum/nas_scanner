@@ -1,8 +1,10 @@
 # nas_scanner
 
 Scans every file on a TrueNAS SCALE system for malicious content, nightly. It checks files with
-local engines (ClamAV, YARA, file-type heuristics) and looks up their hashes with free
-threat-intel services. Only hashes ever leave the NAS, never file contents. The NAS data is
+local engines (ClamAV, YARA, file-type heuristics), matches every hash against downloaded
+malware hash feeds (MalwareBazaar, ThreatFox, VirusShare), and looks up the hashes of risky files
+with free threat-intel services (CIRCL, Team Cymru, VirusTotal, MalwareBazaar, YARAify, Hybrid
+Analysis, MetaDefender, OTX, Kaspersky OpenTIP). Only hashes ever leave the NAS, never file contents. The NAS data is
 mounted read-only: the scanner reports and never changes, moves or deletes a file. Findings show
 in a web UI, in reports, and by email.
 

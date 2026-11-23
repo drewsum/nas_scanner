@@ -557,6 +557,7 @@ dependencies = [
     { name = "alembic" },
     { name = "croniter" },
     { name = "fastapi" },
+    { name = "httpx" },
     { name = "oletools" },
     { name = "psycopg", extra = ["binary"] },
     { name = "pydantic-settings" },
@@ -568,7 +569,6 @@ dependencies = [
 
 [package.dev-dependencies]
 dev = [
-    { name = "httpx" },
     { name = "pytest" },
     { name = "ruff" },
 ]
@@ -578,6 +578,7 @@ requires-dist = [
     { name = "alembic", specifier = ">=1.14" },
     { name = "croniter", specifier = ">=6.0" },
     { name = "fastapi", specifier = ">=0.115" },
+    { name = "httpx", specifier = ">=0.28" },
     { name = "oletools", specifier = ">=0.60.2" },
     { name = "psycopg", extras = ["binary"], specifier = ">=3.2" },
     { name = "pydantic-settings", specifier = ">=2.6" },
@@ -589,7 +590,6 @@ requires-dist = [
 
 [package.metadata.requires-dev]
 dev = [
-    { name = "httpx", specifier = ">=0.28" },
     { name = "pytest", specifier = ">=8.3" },
     { name = "ruff", specifier = ">=0.8" },
 ]

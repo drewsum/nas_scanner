@@ -68,6 +68,23 @@ export interface Detection {
 }
 
 /** Fired when the API answers 401, so the app can show the login page. */
+export interface IntelProvider {
+  name: string;
+  kind: "feed" | "lookup";
+  title: string;
+  enabled: boolean;
+  status: string;
+  message: string;
+  last_success: string | null;
+  last_error: string | null;
+  paused_until: string | null;
+  requests_today: number;
+  daily_budget: number | null;
+  per_minute: number | null;
+  entries: number;
+  details: { pending?: number } | null;
+}
+
 export const UNAUTHORIZED_EVENT = "nasscan:unauthorized";
 
 async function request<T>(method: string, path: string, body?: unknown): Promise<T> {
@@ -102,4 +119,5 @@ export const api = {
   cancelRun: (id: number) => request<ScanRun>("POST", `/api/runs/${id}/cancel`),
   engines: () => get<EngineStatus[]>("/api/engines"),
   detections: () => get<Detection[]>("/api/detections?limit=100"),
+  intel: () => get<IntelProvider[]>("/api/intel/providers"),
 };

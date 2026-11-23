@@ -80,6 +80,38 @@ class Settings(BaseSettings):
     # Where downloaded rules and other scanner state live (a volume).
     data_dir: str = "/data"
 
+    # --- Threat intel (hashes only ever leave the NAS, never file contents) ----------------
+    # Hash feeds downloaded and matched locally against every hashed file: malwarebazaar and
+    # threatfox (both need abusech_auth_key), virusshare (no key; the newest virusshare_lists
+    # MD5 lists, 65,536 hashes each lately). Comma separated; empty turns feeds off.
+    intel_feeds: str = "malwarebazaar,threatfox,virusshare"
+    virusshare_lists: int = Field(default=16, ge=1, le=1000)
+    # More hash lists to download, as name=url pairs, comma separated (CSV, text or a zipped
+    # one; every MD5/SHA-1/SHA-256 in it counts as malicious). {abusech_key} in a URL is
+    # replaced with abusech_auth_key.
+    intel_extra_feeds: str = ""
+    intel_feed_refresh_hours: float = Field(default=24.0, ge=1)
+    # Live hash lookups, made only for "interesting" files (executables, scripts, macro
+    # documents, archives, anything an engine flagged) and only hashes nobody lists as known
+    # good. Providers without a key are off; names listed in intel_disabled are off too
+    # (circl, cymru, malwarebazaar, yaraify, virustotal, hybrid-analysis, metadefender, otx,
+    # opentip, or a feed's name).
+    intel_lookups: bool = True
+    intel_disabled: str = ""
+    # Daily request budget and requests per minute per provider, overriding the defaults
+    # (which fit each free tier), e.g. "virustotal=500/4,metadefender=2000".
+    intel_limits: str = ""
+    # Cached answers are asked again after this many days: not found or clean, and found.
+    intel_recheck_days: float = Field(default=7.0, gt=0)
+    intel_hit_recheck_days: float = Field(default=30.0, gt=0)
+    # abuse.ch (MalwareBazaar, ThreatFox, YARAify); free at https://auth.abuse.ch/
+    abusech_auth_key: SecretStr | None = None
+    virustotal_api_key: SecretStr | None = None
+    hybrid_analysis_api_key: SecretStr | None = None
+    metadefender_api_key: SecretStr | None = None
+    otx_api_key: SecretStr | None = None
+    opentip_api_key: SecretStr | None = None
+
     # Password for the web UI and API. Unset leaves both open to anyone on the LAN.
     admin_password: SecretStr | None = None
     session_days: float = Field(default=30.0, gt=0)
@@ -120,6 +152,41 @@ class Settings(BaseSettings):
     @property
     def yara_source_names(self) -> list[str]:
         return [p.strip() for p in self.yara_sources.split(",") if p.strip()]
+
+    @property
+    def intel_feed_names(self) -> list[str]:
+        return [p.strip().lower() for p in self.intel_feeds.split(",") if p.strip()]
+
+    @property
+    def intel_disabled_names(self) -> set[str]:
+        return {p.strip().lower() for p in self.intel_disabled.split(",") if p.strip()}
+
+    @property
+    def intel_extra_feed_urls(self) -> dict[str, str]:
+        out = {}
+        for part in self.intel_extra_feeds.split(","):
+            name, sep, url = part.partition("=")
+            if sep and name.strip() and url.strip():
+                out[name.strip().lower()] = url.strip()
+        return out
+
+    @property
+    def intel_limit_overrides(self) -> dict[str, tuple[int | None, float | None]]:
+        """name -> (daily budget, per minute); either may be None (keep the default)."""
+        out: dict[str, tuple[int | None, float | None]] = {}
+        for part in self.intel_limits.split(","):
+            name, sep, value = part.partition("=")
+            if not sep or not name.strip():
+                continue
+            daily, _, minute = value.partition("/")
+            try:
+                out[name.strip().lower()] = (
+                    int(daily) if daily.strip() else None,
+                    float(minute) if minute.strip() else None,
+                )
+            except ValueError:
+                continue
+        return out
 
     @property
     def exclude_patterns(self) -> list[str]:

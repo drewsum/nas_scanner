@@ -2,7 +2,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useState } from "react";
 import { api, UNAUTHORIZED_EVENT } from "./api";
 import { Login } from "./Login";
-import { DetectionsPanel, EnginesPanel } from "./Engines";
+import { DetectionsPanel, EnginesPanel, IntelPanel } from "./Engines";
 import { RunsPanel } from "./Runs";
 
 // Pages register here as milestones land (M5: dashboard, runs, findings, files, providers).
@@ -27,6 +27,7 @@ function Dashboard() {
       <DetectionsPanel />
       <RunsPanel />
       <EnginesPanel />
+      <IntelPanel />
     </div>
   );
 }

@@ -113,13 +113,64 @@ Every file that's read goes through these engines:
 and confirmed as media by their real type, are read only at the start and end
 (`NASSCAN_PARTIAL_CHUNK_MB` each). That catches a program disguised as a movie and malware
 appended to one, without reading 50 GB films. A file named `.mkv` that isn't really video is
-read whole. These files get no hashes, so the threat-intel lookups in M3 skip them.
+read whole. These files get no hashes, so threat intel skips them.
 
 **Memory.** clamd needs about 1.5 GB (`NASSCAN_CLAMD_MEMORY_LIMIT`, default 3g); the scanner
 holds up to `NASSCAN_SCAN_WORKERS` x `NASSCAN_MEMORY_READ_MB` of file data at once.
 
 **Permissions.** The scanner runs as uid 10001 and can only read files that user may read
 (world-readable ones, typically). Files it can't open are listed as errors on each scan.
+
+## Threat intel
+
+Only hashes leave the NAS. Nothing is ever uploaded.
+
+**Hash feeds** are downloaded daily and matched locally against every file that has a hash,
+so they cover every file at no cost. A match is a *malicious* detection.
+
+| Feed | Key | What |
+|---|---|---|
+| `malwarebazaar` | `NASSCAN_ABUSECH_AUTH_KEY` | Every sample in MalwareBazaar (a full export weekly, the last 48 hours daily) |
+| `threatfox` | `NASSCAN_ABUSECH_AUTH_KEY` | File hashes among ThreatFox's IOCs from the last six months |
+| `virusshare` | none | The newest `NASSCAN_VIRUSSHARE_LISTS` (16) VirusShare MD5 lists; recent lists hold 65,536 hashes each, so the default is about a million hashes and 160 MB of database (backups leave them out; they are downloaded again after a restore) |
+
+The abuse.ch key is free at [auth.abuse.ch](https://auth.abuse.ch/). abuse.ch documents the
+"recent" export URLs publicly. The full-export URLs this app uses follow the same pattern
+(`.../v2/files/exports/<key>/full.csv.zip`) but sit behind their login. If a feed shows an HTTP
+error, compare the URL on abuse.ch's export page and add it with `NASSCAN_INTEL_EXTRA_FEEDS`.
+That setting also adds any other hash list, such as URLhaus payloads:
+`urlhaus=https://urlhaus-api.abuse.ch/v2/files/exports/{abusech_key}/<file from their page>`.
+
+**Live lookups** only see files worth a lookup: executables, scripts, macro documents,
+archives, PDFs, and anything a local engine flagged, most suspicious first. Photos, films and
+plain documents never use quota.
+
+1. **CIRCL hashlookup** (no key) runs first, on SHA-1. Files it knows from NSRL and other
+   software sets are known good, and the other providers skip them. CIRCL also flags files it
+   lists as known malicious.
+2. Files a feed already lists are skipped too.
+3. The rest go to each provider that has a key, within its daily budget and per-minute rate.
+
+| Provider | Key | Free-tier defaults (requests per day / per minute) |
+|---|---|---|
+| CIRCL hashlookup | none | 20,000 / 30, 100 hashes per request |
+| Team Cymru MHR | none | 5,000 / 10, 200 hashes per request |
+| MalwareBazaar, YARAify | `NASSCAN_ABUSECH_AUTH_KEY` | 2,000 / 30 each |
+| VirusTotal | `NASSCAN_VIRUSTOTAL_API_KEY` | 500 / 4 |
+| Hybrid Analysis | `NASSCAN_HYBRID_ANALYSIS_API_KEY` | 5,000 / 20 |
+| MetaDefender Cloud | `NASSCAN_METADEFENDER_API_KEY` | 2,000 / 20 |
+| AlienVault OTX | `NASSCAN_OTX_API_KEY` | 10,000 / 30 |
+| Kaspersky OpenTIP | `NASSCAN_OPENTIP_API_KEY` | 1,000 / 10 |
+
+- **Limits.** Override a limit with `NASSCAN_INTEL_LIMITS`, e.g. `virustotal=1000/30` for a paid
+  plan. Budgets reset at 00:00 UTC and survive restarts.
+- **Errors.** A provider that answers "rate limited" or rejects its key is paused, for the time
+  it asks or for 15 minutes to 6 hours.
+- **Rechecks.** Answers are cached. "Not found" and clean answers are asked again after
+  `NASSCAN_INTEL_RECHECK_DAYS` (7), hits after `NASSCAN_INTEL_HIT_RECHECK_DAYS` (30), and
+  known-good answers after 90 days.
+- **Dashboard.** The **Threat intel** panel shows every source: on or off (and why), feed sizes,
+  quota used today, the last success, and how many hashes wait.
 
 ## Rolling back
 

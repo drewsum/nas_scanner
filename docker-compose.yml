@@ -8,6 +8,8 @@ x-app: &app
     NASSCAN_DATABASE_URL: postgresql+psycopg://${POSTGRES_USER}:${POSTGRES_PASSWORD}@db:5432/${POSTGRES_DB}
     # In .env, NASSCAN_SCAN_ROOT is the host folder to mount; inside, it's always /scan.
     NASSCAN_SCAN_ROOT: /scan
+    # Likewise NASSCAN_DATA_DIR is the server's dataset path; inside it's the scanner-data volume.
+    NASSCAN_DATA_DIR: /data
     NASSCAN_CLAMD_HOST: clamd
   restart: unless-stopped
 

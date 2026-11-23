@@ -7,6 +7,7 @@ dependencies = [
     "alembic>=1.14",
     "croniter>=6.0",
     "fastapi>=0.115",
+    "httpx>=0.28",
     "oletools>=0.60.2",
     "psycopg[binary]>=3.2",
     "pydantic-settings>=2.6",
@@ -21,7 +22,6 @@ nasscan = "nasscan.cli:main"
 
 [dependency-groups]
 dev = [
-    "httpx>=0.28",
     "pytest>=8.3",
     "ruff>=0.8",
 ]
