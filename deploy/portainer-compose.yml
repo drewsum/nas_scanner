@@ -48,7 +48,7 @@ x-logging: &logging
 # read-only filesystem; only /tmp (and the volumes below) can be written.
 x-app: &app
   # Rewritten by .github/workflows/release.yml on every push to main; keep it on one line.
-  image: ${NASSCAN_IMAGE:-ghcr.io/drewsum/nas_scanner:sha-311f908}
+  image: ${NASSCAN_IMAGE:-ghcr.io/drewsum/nas_scanner:sha-dce21e3}
   environment: *nasscan-env
   restart: unless-stopped
   logging: *logging
@@ -122,7 +122,7 @@ services:
   # The first start downloads ~300 MB of signatures; it needs about 1.5 GB of RAM.
   clamd:
     # Rewritten by .github/workflows/release.yml with the app image; keep it on one line.
-    image: ${NASSCAN_CLAMD_IMAGE:-ghcr.io/drewsum/nas_scanner:clamd-latest}
+    image: ${NASSCAN_CLAMD_IMAGE:-ghcr.io/drewsum/nas_scanner:clamd-sha-dce21e3}
     environment:
       FANGFRISCH_SANESECURITY: ${FANGFRISCH_SANESECURITY:-yes}
       FANGFRISCH_URLHAUS: ${FANGFRISCH_URLHAUS:-no}
