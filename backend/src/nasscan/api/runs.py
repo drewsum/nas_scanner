@@ -36,6 +36,8 @@ class RunOut(BaseModel):
     bytes_seen: int
     bytes_hashed: int
     errors: int
+    files_flagged: int
+    detections: int
     current_path: str | None
     last_error: str | None
     message: str | None

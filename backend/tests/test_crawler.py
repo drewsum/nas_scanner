@@ -10,9 +10,12 @@ from sqlalchemy import select, text
 from nasscan.cli import main
 from nasscan.config import get_settings
 from nasscan.db import get_sessionmaker
-from nasscan.db.models import File, ScanRun
+from nasscan.db.models import Detection, File, ScanRun
 from nasscan.scanner import crawler as crawler_mod
 from nasscan.scanner.crawler import Crawler, batches
+from nasscan.scanner.engines import Pipeline
+from nasscan.scanner.engines.base import Engine, EngineUnavailableError, Finding
+from nasscan.scanner.engines.heuristics import HeuristicsEngine
 from nasscan.scanner.hashing import Stopped
 from nasscan.scanner.runs import ScanBusyError, claim_next, enqueue, requeue_interrupted
 from nasscan.scanner.walker import FoundFile
@@ -24,7 +27,7 @@ pytestmark = pytest.mark.db
 def scan_root(db_env, monkeypatch, tmp_path):
     main(["migrate"])
     with get_sessionmaker()() as s:
-        s.execute(text("TRUNCATE files, scan_runs RESTART IDENTITY CASCADE"))
+        s.execute(text("TRUNCATE files, scan_runs, engine_status RESTART IDENTITY CASCADE"))
         s.commit()
     root = tmp_path / "scan"
     root.mkdir()
@@ -41,12 +44,12 @@ def put(root, rel, data=b"data"):
     return p
 
 
-def scan(kind="incremental", root="", stop=None) -> ScanRun:
+def scan(kind="incremental", root="", stop=None, pipeline=None) -> ScanRun:
     sessions = get_sessionmaker()
     with sessions() as s:
         run_id = enqueue(s, kind, "manual", root).id
         claim_next(s)
-    Crawler(get_settings(), sessions, stop).execute(run_id)
+    Crawler(get_settings(), sessions, stop, pipeline).execute(run_id)
     with sessions() as s:
         return s.get_one(ScanRun, run_id)
 
@@ -173,19 +176,19 @@ def test_files_under_unreadable_folders_are_not_marked_removed(scan_root):
 def test_an_unreadable_file_is_recorded_as_an_error(scan_root, monkeypatch):
     put(scan_root, "good")
     put(scan_root, "bad")
-    real = crawler_mod.digest_file
+    real = crawler_mod.read_file
 
     def flaky(path, *args, **kwargs):
         if str(path).endswith("bad") or path.endswith(b"bad"):
             raise PermissionError(13, "Permission denied")
         return real(path, *args, **kwargs)
 
-    monkeypatch.setattr(crawler_mod, "digest_file", flaky)
+    monkeypatch.setattr(crawler_mod, "read_file", flaky)
     run = scan()
     assert run.status == "completed" and run.errors == 1 and "bad" in run.last_error
     bad = files()["bad"]
     assert bad.status == "error" and bad.error == "Permission denied" and bad.sha256 is None
-    monkeypatch.setattr(crawler_mod, "digest_file", real)
+    monkeypatch.setattr(crawler_mod, "read_file", real)
     assert scan().files_changed == 1  # retried next time
     assert files()["bad"].status == "active"
 
@@ -195,7 +198,7 @@ def test_an_interrupted_run_resumes_where_it_stopped(scan_root, monkeypatch):
         put(scan_root, f"f{i}", str(i).encode())
     monkeypatch.setattr(crawler_mod, "BATCH", 2)
     stop = threading.Event()
-    real = crawler_mod.digest_file
+    real = crawler_mod.read_file
     reads = []
 
     def stop_during_second_batch(path, *args, **kwargs):
@@ -204,7 +207,7 @@ def test_an_interrupted_run_resumes_where_it_stopped(scan_root, monkeypatch):
             stop.set()  # the container is stopping: this read and its batch are abandoned
         return real(path, *args, **kwargs)
 
-    monkeypatch.setattr(crawler_mod, "digest_file", stop_during_second_batch)
+    monkeypatch.setattr(crawler_mod, "read_file", stop_during_second_batch)
     sessions = get_sessionmaker()
     with sessions() as s:
         run_id = enqueue(s, "incremental", "schedule").id
@@ -266,3 +269,71 @@ def test_folder_paths_are_normalized_and_kept_inside_the_root(scan_root):
         with pytest.raises(ValueError, match="inside"):
             enqueue(s, "path", "manual", "../etc")
         assert enqueue(s, "path", "manual", "/").kind == "full"
+
+
+class Flagger(Engine):
+    """Flags files whose content contains b'BAD'; can be switched off like a dead clamd."""
+
+    name = "flagger"
+    down = False
+
+    def scan(self, c):
+        if self.down:
+            raise EngineUnavailableError("flagger is down")
+        return [Finding("flagger", "bad", "malicious", "bad content")] * (b"BAD" in (c.data or b""))
+
+
+def detections() -> list[tuple[str, str, str]]:
+    with get_sessionmaker()() as s:
+        rows = s.execute(
+            select(File.path, Detection.engine, Detection.name)
+            .join(File, File.id == Detection.file_id)
+            .order_by(File.path, Detection.engine, Detection.name)
+        ).all()
+    return [tuple(r) for r in rows]
+
+
+def test_findings_are_recorded_refreshed_and_dropped(scan_root):
+    settings = get_settings()
+    flagger = Flagger(settings)
+    pipeline = Pipeline(settings, [flagger, HeuristicsEngine(settings)])
+    put(scan_root, "Movies/x.mkv.exe", b"BAD stuff")
+    put(scan_root, "clean.txt", b"fine")
+    run = scan(pipeline=pipeline)
+    assert (run.files_flagged, run.detections) == (1, 3)
+    assert "1 flagged" in run.message
+    assert detections() == [
+        ("Movies/x.mkv.exe", "flagger", "bad"),
+        ("Movies/x.mkv.exe", "heuristics", "double_extension"),
+        ("Movies/x.mkv.exe", "heuristics", "executable_in_media_folder"),
+    ]
+    first_seen = files()["Movies/x.mkv.exe"].last_scanned
+
+    # The engine is down during the next read: its earlier finding is kept.
+    flagger.down = True
+    put(scan_root, "Movies/x.mkv.exe", b"BAD stuff, edited")
+    run = scan(pipeline=pipeline)
+    assert "flagger skipped 1 files (flagger is down)" in run.message
+    assert ("Movies/x.mkv.exe", "flagger", "bad") in detections()
+    assert files()["Movies/x.mkv.exe"].last_scanned > first_seen
+
+    # Back up, and the content is clean now: the finding goes.
+    flagger.down = False
+    put(scan_root, "Movies/x.mkv.exe", b"clean now")
+    scan(pipeline=pipeline)
+    assert [d[1] for d in detections()] == ["heuristics", "heuristics"]
+
+
+def test_large_media_gets_a_partial_scan(scan_root, monkeypatch):
+    from nasscan.scanner import hashing
+
+    monkeypatch.setenv("NASSCAN_LARGE_FILE_MB", "16")
+    monkeypatch.setenv("NASSCAN_PARTIAL_CHUNK_MB", "1")
+    get_settings.cache_clear()
+    monkeypatch.setattr(hashing, "detect_type", lambda head: ("video/mp4", "ISO Media"))
+    put(scan_root, "movies/film.mp4", b"z" * (17 * 1024 * 1024))
+    run = scan()
+    f = files()["movies/film.mp4"]
+    assert (f.scan_mode, f.sha256, f.mime) == ("partial", None, "video/mp4")
+    assert run.bytes_hashed == 2 * 1024 * 1024
+    assert scan().files_hashed == 0  # unchanged: not read again

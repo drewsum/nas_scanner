@@ -91,6 +91,7 @@ export function RunsPanel() {
               <th>Changed</th>
               <th>Removed</th>
               <th>Read</th>
+              <th>Flagged</th>
               <th>Errors</th>
             </tr>
           </thead>
@@ -113,6 +114,7 @@ export function RunsPanel() {
                 <td>{r.files_changed.toLocaleString()}</td>
                 <td>{r.files_removed.toLocaleString()}</td>
                 <td>{formatBytes(r.bytes_hashed)}</td>
+                <td className={r.files_flagged ? "error" : undefined}>{r.files_flagged.toLocaleString()}</td>
                 <td className={r.errors ? "error" : undefined}>{r.errors.toLocaleString()}</td>
               </tr>
             ))}

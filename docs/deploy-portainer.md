@@ -22,9 +22,11 @@ a redeploy has landed.
 | `migrate` | one-off: applies migrations, then exits |
 | `api` | API + UI on `${NASSCAN_API_PUBLISH_PORT}` |
 | `scanner` | nightly incremental and weekly full scans; mounts `${NASSCAN_SCAN_ROOT}` read-only at `/scan` |
+| `clamd` | ClamAV with official and unofficial signatures (`deploy/clamd`); the scanner streams files to it, so it has no access to the data |
 | `backup` | daily `pg_dump` into `${NASSCAN_DATA_DIR}/backups`, keeping 14 |
 
-ClamAV (`clamd`) joins the stack in M2.
+Both images come from the same GHCR package: the app as `sha-<short>` and clamd as
+`clamd-sha-<short>`. The release workflow bumps both tags in one commit.
 
 ## One-time setup
 
@@ -94,6 +96,30 @@ LAN, and the UI warns about it. Changing it logs everyone out.
   are left alone.
 - **Scan now.** Use the buttons on the dashboard, or
   `docker exec <scanner container> nasscan scan [--full | --path some/folder]`.
+
+## Engines
+
+Every file that's read goes through these engines:
+
+| Engine | What it checks | Updates |
+|---|---|---|
+| ClamAV | Official signatures plus Sanesecurity's unofficial sets (malware, phishing, macro and script signatures) | freshclam and fangfrisch inside the clamd container, hourly |
+| YARA | YARA Forge's core rule package (5000+ rules from many public repos, including most of signature-base); `NASSCAN_YARA_SOURCES` picks bigger packages or signature-base itself; your own rules from `/rules` | downloaded and compiled daily; rules that don't compile are skipped |
+| Heuristics | `movie.mkv.exe`, programs named as media or documents, programs and scripts in media folders, right-to-left name tricks | built in |
+| Documents | Office macros (auto-run, shell commands, downloads) with oletools; PDF JavaScript, auto-open actions, `/Launch`, embedded files | built in |
+| 3D print files | 3MF/AMF members unpacked and scanned by the other engines; programs hidden inside; G-code that runs host commands or flashes firmware; files named `.stl` that aren't STL | built in |
+
+**Large media.** Movies and music bigger than `NASSCAN_LARGE_FILE_MB` (512 MB), named as media
+and confirmed as media by their real type, are read only at the start and end
+(`NASSCAN_PARTIAL_CHUNK_MB` each). That catches a program disguised as a movie and malware
+appended to one, without reading 50 GB films. A file named `.mkv` that isn't really video is
+read whole. These files get no hashes, so the threat-intel lookups in M3 skip them.
+
+**Memory.** clamd needs about 1.5 GB (`NASSCAN_CLAMD_MEMORY_LIMIT`, default 3g); the scanner
+holds up to `NASSCAN_SCAN_WORKERS` x `NASSCAN_MEMORY_READ_MB` of file data at once.
+
+**Permissions.** The scanner runs as uid 10001 and can only read files that user may read
+(world-readable ones, typically). Files it can't open are listed as errors on each scan.
 
 ## Rolling back
 

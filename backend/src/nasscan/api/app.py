@@ -8,7 +8,7 @@ from pydantic import BaseModel, Field
 from sqlalchemy import text
 
 from nasscan import __version__
-from nasscan.api import auth, runs
+from nasscan.api import auth, engines, runs
 from nasscan.api.deps import DB
 from nasscan.config import get_settings
 
@@ -115,6 +115,7 @@ def create_app() -> FastAPI:
         return Health(status="ok", version=__version__, commit=settings.git_sha, database=True)
 
     app.include_router(runs.router)
+    app.include_router(engines.router)
     _mount_spa(app, settings.web_dist_dir)
     return app
 

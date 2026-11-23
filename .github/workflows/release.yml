@@ -57,12 +57,31 @@ jobs:
           cache-from: type=gha
           cache-to: type=gha,mode=max
 
+      # The clamd sidecar, in the same (public) package under clamd- tags.
+      - uses: docker/build-push-action@v6
+        with:
+          context: deploy/clamd
+          platforms: linux/amd64
+          push: true
+          tags: |
+            ${{ env.IMAGE }}:clamd-${{ steps.tag.outputs.tag }}
+            ${{ env.IMAGE }}:clamd-latest
+          labels: |
+            org.opencontainers.image.source=https://github.com/${{ github.repository }}
+            org.opencontainers.image.revision=${{ github.sha }}
+          cache-from: type=gha,scope=clamd
+          cache-to: type=gha,mode=max,scope=clamd
+
       - name: Point the deploy stack at the new image
         env:
           TAG: ${{ steps.tag.outputs.tag }}
         run: |
-          sed -i -E "s#(ghcr\.io/drewsum/nas_scanner):[A-Za-z0-9._-]+#\1:${TAG}#" deploy/portainer-compose.yml
+          sed -i -E \
+            -e "s#(ghcr\.io/drewsum/nas_scanner):(sha-[0-9a-f]+|latest)\b#\1:${TAG}#" \
+            -e "s#(ghcr\.io/drewsum/nas_scanner):clamd-(sha-[0-9a-f]+|latest)\b#\1:clamd-${TAG}#" \
+            deploy/portainer-compose.yml
           grep -q "nas_scanner:${TAG}" deploy/portainer-compose.yml
+          grep -q "nas_scanner:clamd-${TAG}" deploy/portainer-compose.yml
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git add deploy/portainer-compose.yml

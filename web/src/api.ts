@@ -33,9 +33,38 @@ export interface ScanRun {
   bytes_seen: number;
   bytes_hashed: number;
   errors: number;
+  files_flagged: number;
+  detections: number;
   current_path: string | null;
   last_error: string | null;
   message: string | null;
+}
+
+export interface EngineStatus {
+  name: string;
+  status: "ok" | "warning" | "error" | "disabled";
+  message: string;
+  version: string | null;
+  signatures_at: string | null;
+  details: Record<string, unknown> | null;
+  checked_at: string;
+}
+
+export type Severity = "info" | "suspicious" | "malicious";
+
+export interface Detection {
+  id: number;
+  file_id: number;
+  path: string;
+  file_status: string;
+  engine: string;
+  name: string;
+  member: string;
+  severity: Severity;
+  description: string | null;
+  details: Record<string, unknown> | null;
+  first_seen: string;
+  last_seen: string;
 }
 
 /** Fired when the API answers 401, so the app can show the login page. */
@@ -71,4 +100,6 @@ export const api = {
   runs: () => get<ScanRun[]>("/api/runs?limit=20"),
   startRun: (kind: RunKind, path = "") => request<ScanRun>("POST", "/api/runs", { kind, path }),
   cancelRun: (id: number) => request<ScanRun>("POST", `/api/runs/${id}/cancel`),
+  engines: () => get<EngineStatus[]>("/api/engines"),
+  detections: () => get<Detection[]>("/api/detections?limit=100"),
 };

@@ -349,3 +349,6 @@ td.blocked { color: var(--bad); }
 .actions { display: flex; gap: 8px; flex-wrap: wrap; }
 .pill.run { background: var(--accent); }
 .pill.muted-pill { background: var(--muted); }
+.stack { display: flex; flex-direction: column; gap: 16px; }
+.pill.warn { background: #b7791f; }
+td.wrap { word-break: break-all; }
