@@ -29,6 +29,8 @@ HASH_LENGTHS = {32: "md5", 40: "sha1", 64: "sha256"}
 NAME_COLUMNS = ("signature", "malware_printable", "malware", "threat", "family")
 HASH_TYPES = {"sha256_hash", "md5_hash", "sha1_hash"}
 HEADER_NAMES = {"sha256_hash", "md5_hash", "sha1_hash", "ioc_value", "sha256", "sha1", "md5"}
+# Resumed requests per download, however much each one gets.
+MAX_RESUMES = 200
 MAX_DOWNLOAD = 4 * 1024**3
 
 
@@ -201,37 +203,53 @@ def fetch(
     wait: float = 10.0,
     stop: threading.Event | None = None,
 ) -> Path:
-    """Stream a download to ``dest``. Dropped connections (big exports get cut off now and
-    then) are retried from the start; HTTP errors are not."""
-    for attempt in range(1, attempts + 1):
+    """Stream a download to ``dest``. Big exports get cut off now and then (the MalwareBazaar
+    dump drops every ~30 s on some links), so a dropped download carries on where it stopped
+    with a Range request. ``attempts`` tries in a row without progress give up; HTTP errors
+    are not retried."""
+    failures = 0
+    offset = 0
+    for _ in range(MAX_RESUMES):
         try:
-            return _fetch_once(client, download, dest)
+            return _fetch_once(client, download, dest, offset)
         except _Interrupted as exc:
-            if attempt == attempts:
+            size = dest.stat().st_size if dest.exists() else 0
+            failures = 0 if size > offset else failures + 1
+            offset = size
+            if failures == attempts:
                 raise FeedError(f"{download.label}: {exc} (tried {attempts} times)") from exc
-            log.info("%s: %s; retrying (%d/%d)", download.label, exc, attempt, attempts)
-            if stop is not None and stop.wait(wait * attempt):
+            log.info("%s: %s after %d MB; resuming", download.label, exc, size // 1_000_000)
+            # Straight back after progress; back off while nothing comes through.
+            delay = wait * failures if failures else min(wait, 2.0)
+            if stop is not None and stop.wait(delay):
                 raise FeedError(f"{download.label}: stopped") from exc
             if stop is None:
-                time.sleep(wait * attempt)
-    raise AssertionError("unreachable")
+                time.sleep(delay)
+    raise FeedError(f"{download.label}: still incomplete after {MAX_RESUMES} tries")
 
 
 class _Interrupted(Exception):
     pass
 
 
-def _fetch_once(client: httpx.Client, download: Download, dest: Path) -> Path:
+def _fetch_once(client: httpx.Client, download: Download, dest: Path, offset: int = 0) -> Path:
     dest.parent.mkdir(parents=True, exist_ok=True)
-    total = 0
+    headers = {"Range": f"bytes={offset}-"} if offset else {}
     try:
-        with client.stream("GET", download.url) as response:
+        with client.stream("GET", download.url, headers=headers) as response:
             if response.status_code in (401, 403):
                 raise FeedError(f"{download.label}: key rejected (HTTP {response.status_code})")
+            if offset and response.status_code == 416:
+                # The server lost track of the file (a new export): start over.
+                dest.unlink(missing_ok=True)
+                raise _Interrupted("range not satisfiable")
             if response.status_code >= 400:
                 raise FeedError(f"{download.label}: HTTP {response.status_code}")
-            with dest.open("wb") as out:
-                for chunk in response.iter_bytes(1024 * 1024):
+            # 206: the rest of the file. 200: the server ignored the Range, so start over.
+            resumed = offset and response.status_code == 206
+            total = offset if resumed else 0
+            with dest.open("ab" if resumed else "wb") as out:
+                for chunk in response.iter_bytes():  # as it comes, so a cut keeps it all
                     total += len(chunk)
                     if total > MAX_DOWNLOAD:
                         raise FeedError(f"{download.label}: bigger than 4 GB")

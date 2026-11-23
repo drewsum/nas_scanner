@@ -15,6 +15,18 @@ from nasscan.scanner.engines.types import (
 
 NAME = "heuristics"
 # Unicode tricks that change how a name reads: right-to-left override and friends.
+# Folders holding installed software and its data, where a 'media' or 'images' folder is the
+# program's own (VS Code ships scripts in .../terminal/browser/media/).
+SOFTWARE_FOLDERS = {
+    "node_modules",
+    "site-packages",
+    "dist-packages",
+    "vendor",
+    "program files",
+    "program files (x86)",
+    "appdata",
+    "library",
+}
 BIDI_CONTROLS = re.compile("[‪-‮⁦-⁩‎‏]")
 
 
@@ -58,7 +70,13 @@ def misplaced_executable(
     if not is_executable(extension, mime):
         return None
     folders = [p.lower() for p in PurePosixPath(path).parts[:-1]]
-    hit = next((f for f in folders if f in media_folders), None)
+    # Below a hidden folder (.vscode-server, .cache, .local) or a software tree the folder
+    # names are the program's, not yours.
+    software = next(
+        (i for i, f in enumerate(folders) if f.startswith(".") or f in SOFTWARE_FOLDERS),
+        len(folders),
+    )
+    hit = next((f for f in folders[:software] if f in media_folders), None)
     if hit is None:
         return None
     return Finding(
