@@ -484,6 +484,50 @@ def test_dropped_downloads_are_retried(tmp_path):
         fetch(c, d, tmp_path / "f", wait=0)
 
 
+def test_dropped_downloads_resume_where_they_stopped(tmp_path):
+    from nasscan.intel.feeds import Download, fetch
+
+    data = bytes(range(256)) * 40
+    ranges = []
+
+    def handler(request):
+        rng = request.headers.get("range")
+        ranges.append(rng)
+        start = int(rng.removeprefix("bytes=").rstrip("-")) if rng else 0
+        part = data[start : start + 3000]
+
+        def body():
+            yield part
+            if start + len(part) < len(data):
+                raise httpx.RemoteProtocolError("peer closed connection", request=request)
+
+        status = 206 if rng else 200
+        return httpx.Response(status, content=body())
+
+    c, _ = client(handler)
+    d = Download("https://example.com/k/full.csv.zip", True, "full.csv.zip")
+    # Four cuts, each after progress: more than `attempts`, still fine.
+    assert fetch(c, d, tmp_path / "f", wait=0).read_bytes() == data
+    assert ranges == [None, "bytes=3000-", "bytes=6000-", "bytes=9000-"]
+
+    # A server that ignores the Range header gets the file from the start again.
+    ignored = []
+
+    def no_ranges(request):
+        ignored.append(1)
+        if len(ignored) == 1:
+
+            def cut():
+                yield data[:100]
+                raise httpx.RemoteProtocolError("cut", request=request)
+
+            return httpx.Response(200, content=cut())
+        return httpx.Response(200, content=data)
+
+    c, _ = client(no_ranges)
+    assert fetch(c, d, tmp_path / "g", wait=0).read_bytes() == data
+
+
 def test_malwarebazaar_falls_back_to_recent(monkeypatch):
     feed = MalwareBazaarFeed(settings(monkeypatch, abusech_auth_key="KEY"))
     (full,) = feed.downloads({}, httpx.Client())

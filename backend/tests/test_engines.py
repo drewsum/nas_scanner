@@ -77,6 +77,11 @@ def test_misplaced_executable():
     assert misplaced_executable("Music/x/run.bat", "bat", None, folders) is not None
     assert misplaced_executable("Photos/IMG_1.jpg", "jpg", "image/jpeg", folders) is None
     assert misplaced_executable("Software/setup.exe", "exe", None, folders) is None
+    # A program's own media folders don't count, but a software folder inside your media does.
+    vscode = "home/me/.vscode-server/bin/abc/out/vs/terminal/browser/media/shellIntegration.ps1"
+    assert misplaced_executable(vscode, "ps1", None, folders) is None
+    assert misplaced_executable("dev/node_modules/x/images/run.js", "js", None, folders) is None
+    assert misplaced_executable("Movies/node_modules/run.js", "js", None, folders) is not None
     # A program without a telling extension is still a program.
     assert misplaced_executable("tv/show/ep1", None, "application/x-dosexec", folders)
 
