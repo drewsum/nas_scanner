@@ -1,7 +1,7 @@
 """The file inventory: search by path or hash, one file's full story, and totals."""
 
 import re
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from typing import Annotated
 
 from fastapi import APIRouter, HTTPException, Query
@@ -12,6 +12,8 @@ from nasscan.api.deps import DB
 from nasscan.db.models import Detection, FeedHash, File, Finding, HashLookup
 
 router = APIRouter(prefix="/api/files", tags=["files"])
+
+EPOCH = datetime(1970, 1, 1, tzinfo=UTC)
 
 HEX_HASH = re.compile(r"^(?:[0-9a-f]{32}|[0-9a-f]{40}|[0-9a-f]{64})$")
 
@@ -243,7 +245,7 @@ def read_file(file_id: int, db: DB) -> FileDetail:
         path=f.path,
         extension=f.extension,
         size=f.size,
-        mtime=datetime.fromtimestamp(f.mtime_ns / 1e9, UTC),
+        mtime=EPOCH + timedelta(microseconds=f.mtime_ns // 1000),
         status=f.status,
         error=f.error,
         mime=f.mime,

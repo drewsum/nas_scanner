@@ -31,6 +31,18 @@ class WalkError:
     is_dir: bool
 
 
+# The database stores these in BIGINT columns. A corrupt timestamp (one seen in the wild
+# reads as the year 1601) can be beyond that range, and one such file would fail the whole
+# scan, so it's clamped to the nearest storable value.
+INT64_MIN = -(2**63)
+INT64_MAX = 2**63 - 1
+
+
+def storable(n: int) -> int:
+    """``n`` clamped into a signed 64-bit range."""
+    return min(max(n, INT64_MIN), INT64_MAX)
+
+
 def display(rel: bytes) -> str:
     """A filesystem path as text. Bytes that aren't UTF-8 become backslash escapes, so the
     result is always storable and the same path always gives the same text."""
@@ -90,7 +102,7 @@ def walk(
                     path=text,
                     full_path=entry.path,
                     size=st.st_size,
-                    mtime_ns=st.st_mtime_ns,
+                    mtime_ns=storable(st.st_mtime_ns),
                     inode=st.st_ino,
                     device=st.st_dev,
                 )
