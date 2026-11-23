@@ -76,6 +76,9 @@ Same as `.env.example`, plus:
 Set `NASSCAN_ADMIN_PASSWORD` on the server: without it the UI and API are open to anyone on the
 LAN, and the UI warns about it. Changing it logs everyone out.
 
+For email alerts, set `NASSCAN_APPRISE_URLS` and `NASSCAN_PUBLIC_URL`
+([notifications](notifications.md)), then press **Send a test** under Reports.
+
 ## Scans
 
 - **Schedule.** `NASSCAN_INCREMENTAL_CRON` (default 02:00 nightly) reads new and changed files;

@@ -12,7 +12,9 @@ in reports, and by email, and can be acknowledged, ignored or allowlisted.
 The web UI has a dashboard (open threats, files on the NAS, the last scan, signature age),
 findings with each engine's evidence and links to VirusTotal and other providers, scan history
 with live progress and what each scan couldn't read, a file search by path or hash, engine and
-provider status, and Scan now (new and changed files, everything, or one folder).
+provider status, and Scan now (new and changed files, everything, or one folder). Alerts go
+out by email or any Apprise service, with a printable report per scan, a weekly report, and
+CSV/JSON exports ([how](docs/notifications.md)).
 
 Built the same way as [network_mapper](https://github.com/drewsum/network_mapper): Python 3.12
 (FastAPI, SQLAlchemy, Alembic) with uv, PostgreSQL, and a React + Vite UI, all in one image

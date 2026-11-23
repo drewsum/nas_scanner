@@ -1,0 +1,22 @@
+<h2>Engines and threat intel</h2>
+{% if versions_live %}<p class="muted small">This scan finished before versions were recorded; these are today's.</p>{% endif %}
+<table>
+  <thead><tr><th>Engine</th><th>Status</th><th>Version</th><th>Signatures from</th></tr></thead>
+  <tbody>
+  {% for e in versions.engines %}
+    <tr><td>{{ e.name }}</td><td>{{ e.status }}</td><td class="mono wrap">{{ e.version or "" }}</td><td>{{ e.signatures_at | when }}</td></tr>
+  {% else %}
+    <tr><td colspan="4" class="muted">No engine had reported.</td></tr>
+  {% endfor %}
+  </tbody>
+</table>
+{% if versions.intel %}
+<table style="margin-top: 12px">
+  <thead><tr><th>Feed or lookup</th><th>Status</th><th class="n">Hashes</th><th>Last success</th></tr></thead>
+  <tbody>
+  {% for p in versions.intel %}
+    <tr><td>{{ p.title }}</td><td>{{ p.status }}</td><td class="n">{% if p.kind == "feed" %}{{ p.entries | number }}{% endif %}</td><td>{{ p.last_success | when }}</td></tr>
+  {% endfor %}
+  </tbody>
+</table>
+{% endif %}

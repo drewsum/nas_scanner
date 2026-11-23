@@ -232,6 +232,9 @@ export function RunPage({ id }: { id: number }) {
         <h1>
           Scan {r.id} <span className={RUN_STATUS_CLASS[r.status] ?? "pill"}>{r.status}</span>
         </h1>
+        <a href={`/api/runs/${r.id}/report`} target="_blank" rel="noopener">
+          Printable report
+        </a>
       </div>
       {active && <Progress run={r} />}
       {r.message && <p className={r.status === "failed" ? "error" : "muted"}>{r.message}</p>}

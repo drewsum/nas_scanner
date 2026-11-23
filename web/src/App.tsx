@@ -6,6 +6,7 @@ import { Dashboard } from "./Dashboard";
 import { EnginesPanel, IntelPanel } from "./Engines";
 import { FilePage, FilesPage } from "./Files";
 import { AllowlistPanel, FindingPage, FindingsPage } from "./Findings";
+import { ReportsPage } from "./Reports";
 import { RunPage, RunsPage } from "./Runs";
 import { useRoute, type Route } from "./util";
 
@@ -14,6 +15,7 @@ const NAV: [string, string][] = [
   ["findings", "Findings"],
   ["scans", "Scans"],
   ["files", "Files"],
+  ["reports", "Reports"],
   ["status", "Status"],
   ["allowlist", "Allowlist"],
 ];
@@ -31,6 +33,8 @@ function Page({ route }: { route: Route }) {
       return withId ? <RunPage key={id} id={id} /> : <RunsPage />;
     case "files":
       return withId ? <FilePage key={id} id={id} /> : <FilesPage route={route} />;
+    case "reports":
+      return <ReportsPage />;
     case "status":
       return (
         <div className="page">

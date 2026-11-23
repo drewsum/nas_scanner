@@ -1,0 +1,56 @@
+{% extends "base.html" %}
+{% block title %}Scan {{ run.id }} report · NAS Scanner{% endblock %}
+{% block mast %}scan {{ run.id }} :: {{ run.kind }}{% if run.root %} {{ run.root }}{% endif %} :: {{ run.status }}{% endblock %}
+{% block body %}
+<h1>Scan {{ run.id }}: {{ run.kind }}{% if run.root %} of <span class="mono">{{ run.root }}</span>{% endif %} <span class="tag {{ run.status }}">{{ run.status }}</span></h1>
+<p class="muted">
+  Started {{ run.started_at | when }}{% if run.finished_at %}, finished {{ run.finished_at | when }} ({{ took(run.started_at, run.finished_at) }}){% endif %},
+  by {{ "you" if run.trigger == "manual" else "the schedule" }}.
+  {% if link %}<a href="{{ link }}" class="noprint">Open in NAS Scanner</a>{% endif %}
+</p>
+{% if run.message %}<p class="{{ 'bad' if run.status == 'failed' else 'muted' }}">{{ run.message }}</p>{% endif %}
+
+<div class="tiles">
+  <div class="tile"><div class="v">{{ run.files_seen | number }}</div><div class="l">files seen</div></div>
+  <div class="tile"><div class="v">{{ run.files_hashed | number }}</div><div class="l">read, {{ run.bytes_hashed | bytes }}</div></div>
+  <div class="tile"><div class="v">{{ run.files_new | number }} / {{ run.files_changed | number }} / {{ run.files_removed | number }}</div><div class="l">new / changed / removed</div></div>
+  <div class="tile"><div class="v {{ 'bad' if run.files_flagged else 'ok' }}">{{ run.files_flagged | number }}</div><div class="l">files flagged ({{ run.detections | number }} detections)</div></div>
+  <div class="tile"><div class="v {{ 'warn' if run.errors else '' }}">{{ run.errors | number }}</div><div class="l">couldn't be read</div></div>
+</div>
+
+<h2>Flagged by this scan</h2>
+{% if findings %}
+<table>
+  <thead><tr><th>File</th><th>Verdict</th><th class="n">Score</th><th>Status</th><th>Why</th></tr></thead>
+  <tbody>
+  {% for f in findings %}
+    <tr>
+      <td class="mono wrap">{{ f.path }}{% if f.file_status == "removed" %} <span class="muted">(removed)</span>{% endif %}</td>
+      <td><span class="tag {{ f.verdict }}">{{ f.verdict }}</span></td>
+      <td class="n">{{ f.score }}</td>
+      <td>{{ f.status }}</td>
+      <td class="small">{{ f.evidence | join("; ") }}</td>
+    </tr>
+  {% endfor %}
+  </tbody>
+</table>
+{% if more_findings %}<p class="muted small">The first {{ findings | length }} are listed.</p>{% endif %}
+{% else %}
+<p class="ok">Nothing this scan read was flagged{% if run.files_flagged %} as suspicious or worse (only informational detections){% endif %}.</p>
+{% endif %}
+
+<h2>Couldn't read</h2>
+{% if errors %}
+<table>
+  <thead><tr><th>Path</th><th>Why</th></tr></thead>
+  <tbody>
+  {% for e in errors %}<tr><td class="mono wrap">{{ e.path or "/" }}</td><td>{{ e.message }}</td></tr>{% endfor %}
+  </tbody>
+</table>
+{% if run.errors > errors | length %}<p class="muted small">The first {{ errors | length }} of {{ run.errors | number }}.</p>{% endif %}
+{% else %}
+<p class="muted">Nothing: every file was read.</p>
+{% endif %}
+
+{% include "_versions.html" %}
+{% endblock %}
