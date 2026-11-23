@@ -38,6 +38,9 @@ web UI and press **Send a test**. It shows whether delivery worked, and why not 
 - **Failed scans,** always.
 - **A digest after every scan,** if `NASSCAN_NOTIFY_DIGEST=true`.
 - **The weekly report,** after the scheduled full scan.
+- **Health problems:** ClamAV, YARA or the database backup failing for half an hour, or no
+  backup for two backup intervals (the backup container stopped). Once per problem, and
+  again when it's fixed. The **Status** page shows the details.
 
 ### Limits
 

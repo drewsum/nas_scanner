@@ -92,7 +92,9 @@ def snapshot_versions(session: Session) -> dict:
             "version": e.version,
             "signatures_at": e.signatures_at.isoformat() if e.signatures_at else None,
         }
-        for e in session.scalars(select(EngineStatus).order_by(EngineStatus.name))
+        for e in session.scalars(
+            select(EngineStatus).where(EngineStatus.name != "backup").order_by(EngineStatus.name)
+        )
     ]
     intel = [
         {

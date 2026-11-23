@@ -3,18 +3,27 @@ against a real database. Apprise is stubbed: nothing leaves the machine."""
 
 import hashlib
 import json
+import subprocess
 from datetime import UTC, datetime, timedelta
 
 import pytest
 from fastapi.testclient import TestClient
 from sqlalchemy import select, text
 
-from nasscan import findings, notify, reports
+from nasscan import findings, health, notify, reports
 from nasscan.api.app import create_app
 from nasscan.cli import main
 from nasscan.config import get_settings
 from nasscan.db import get_sessionmaker
-from nasscan.db.models import Detection, File, Finding, Notification, Report, ScanRun
+from nasscan.db.models import (
+    Detection,
+    EngineStatus,
+    File,
+    Finding,
+    Notification,
+    Report,
+    ScanRun,
+)
 
 pytestmark = pytest.mark.db
 
@@ -264,3 +273,66 @@ def test_runs_record_versions(env):
         s.commit()
         snap = reports.snapshot_versions(s)
     assert snap["engines"][0]["version"] == "ClamAV 1.4"
+
+
+def set_since(name: str, ago: timedelta) -> None:
+    with get_sessionmaker()() as s:
+        row = s.get(EngineStatus, name)
+        row.problem_since = datetime.now(UTC) - ago
+        row.checked_at = datetime.now(UTC)
+        s.commit()
+
+
+def test_health_alerts_after_the_grace_period_and_on_recovery(env):
+    health.record("clamav", "error", "clamd isn't answering")
+    health.record("yara", "ok", "rules compiled")
+    assert send() == 0  # just started: clamd may still be loading
+    set_since("clamav", timedelta(minutes=31))
+    health.record("clamav", "error", "clamd isn't answering, still")  # keeps problem_since
+    assert send() == 1
+    title, body = env["sent"][-1]["title"], env["sent"][-1]["body"]
+    assert title == "nasscan: ClamAV needs attention"
+    assert "clamd isn't answering, still" in body and "http://nas:8010/#/status" in body
+    assert send() == 0  # once per problem
+
+    health.record("clamav", "ok", "ClamAV 1.4")
+    with get_sessionmaker()() as s:
+        assert s.get(EngineStatus, "clamav").problem_since is None
+    assert send() == 1
+    assert env["sent"][-1]["title"] == "nasscan: ClamAV working again"
+    assert send() == 0
+
+
+def test_a_silent_backup_service_alerts(env):
+    health.record("backup", "ok", "Backed up the database (1 MB); 3 backups kept.")
+    with get_sessionmaker()() as s:
+        s.get(EngineStatus, "backup").checked_at = datetime.now(UTC) - timedelta(hours=50)
+        s.commit()
+    assert send() == 1
+    assert env["sent"][-1]["title"] == "nasscan: The database backup needs attention"
+    assert "is the backup container running?" in env["sent"][-1]["body"]
+    with get_sessionmaker()() as s:  # the row's own message is untouched
+        assert s.get(EngineStatus, "backup").message.startswith("Backed up")
+    health.record("backup", "ok", "Backed up the database (1 MB); 4 backups kept.")
+    assert send() == 1
+    assert env["sent"][-1]["title"] == "nasscan: The database backup working again"
+
+
+def test_backup_records_its_status(env, tmp_path, monkeypatch):
+    from nasscan import backup
+
+    monkeypatch.setenv("NASSCAN_BACKUP_DIR", str(tmp_path))
+    get_settings.cache_clear()
+
+    def fake_pg(args, **kw):
+        path = args[args.index("--file") + 1]
+        with open(path, "wb") as f:
+            f.write(b"dump")
+        return subprocess.CompletedProcess(args, 0, "", "")
+
+    result = backup.backup_once(get_settings(), datetime.now(UTC), fake_pg)
+    assert result.status == "ok"
+    with get_sessionmaker()() as s:
+        row = s.get(EngineStatus, "backup")
+        assert row.status == "ok" and row.details["kept"] == 1
+        assert "backup" not in {e["name"] for e in reports.snapshot_versions(s)["engines"]}

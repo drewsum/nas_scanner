@@ -204,7 +204,8 @@ class Detection(Base):
 
 
 class EngineStatus(Base):
-    """Each engine's health and signature age, refreshed by the scanner."""
+    """Each engine's health and signature age, refreshed by the scanner, and the database
+    backup's (name ``backup``), written by the backup service."""
 
     __tablename__ = "engine_status"
 
@@ -215,6 +216,9 @@ class EngineStatus(Base):
     signatures_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     details: Mapped[dict | None] = mapped_column(JSONB)
     checked_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    # When the current warning or error started (NULL while healthy), and when it was notified.
+    problem_since: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    alerted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 
 
 class FeedHash(Base):

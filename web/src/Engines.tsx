@@ -8,6 +8,7 @@ export const ENGINE_LABELS: Record<string, string> = {
   heuristics: "Heuristics",
   documents: "Documents",
   printing: "3D print files",
+  backup: "Database backup",
   "malwarebazaar-feed": "MalwareBazaar feed",
   "threatfox-feed": "ThreatFox feed",
   "virusshare-feed": "VirusShare feed",
@@ -43,7 +44,7 @@ export function EnginesPanel() {
   const engines = useQuery({ queryKey: ["engines"], queryFn: api.engines, refetchInterval: 60_000 });
   return (
     <section className="card">
-      <h2>Engines</h2>
+      <h2>Engines and backups</h2>
       {engines.data?.length === 0 && <p className="muted">The scanner hasn't reported yet.</p>}
       {!!engines.data?.length && (
         <table>

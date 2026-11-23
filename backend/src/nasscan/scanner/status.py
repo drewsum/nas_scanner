@@ -5,11 +5,8 @@ import asyncio
 import logging
 from datetime import UTC, datetime, timedelta
 
-from sqlalchemy.dialects.postgresql import insert
-
 from nasscan.config import Settings
-from nasscan.db import get_sessionmaker
-from nasscan.db.models import EngineStatus
+from nasscan.health import record
 from nasscan.scanner.base import Source
 from nasscan.scanner.engines.base import EngineUnavailableError
 from nasscan.scanner.engines.clamav import ClamdClient, parse_version
@@ -19,26 +16,6 @@ log = logging.getLogger(__name__)
 
 # Signatures older than this mean updates have stopped.
 STALE_AFTER = timedelta(days=3)
-
-
-def record(name: str, status: str, message: str, **fields) -> None:
-    values = {
-        "name": name,
-        "status": status,
-        "message": message,
-        "version": fields.get("version"),
-        "signatures_at": fields.get("signatures_at"),
-        "details": fields.get("details"),
-        "checked_at": datetime.now(UTC),
-    }
-    with get_sessionmaker()() as session:
-        stmt = insert(EngineStatus).values(**values)
-        session.execute(
-            stmt.on_conflict_do_update(
-                index_elements=["name"], set_={k: stmt.excluded[k] for k in values if k != "name"}
-            )
-        )
-        session.commit()
 
 
 def check_clamav(settings: Settings) -> None:

@@ -45,6 +45,9 @@ class Settings(BaseSettings):
     # idle class, so the NAS stays responsive (the throttle above is the main control on ZFS).
     scanner_nice: int = Field(default=10, ge=0, le=19)
     scanner_ionice_idle: bool = True
+    # Read every file whatever its permissions (the server stack's scanner keeps the
+    # DAC_READ_SEARCH capability for it; deploy/scanner/start.sh). Off: only what uid 10001 may.
+    scanner_read_all: bool = True
 
     # Reading files for the engines. Files up to memory_read_mb are read once into memory and
     # every engine scans that copy. Media files (by name and real type) over large_file_mb are

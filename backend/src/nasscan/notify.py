@@ -7,6 +7,8 @@ What goes out, every 30 seconds at most:
   it, or the next scan seeing it again, sends nothing.
 - **Failed scans**, always; **scan digests** after every finished scan with NASSCAN_NOTIFY_DIGEST.
 - **The weekly report**, when it's made (NASSCAN_NOTIFY_WEEKLY_REPORT).
+- **Health problems:** an engine (ClamAV, YARA, ...) or the database backup in trouble for
+  half an hour, or no backup for twice the backup interval; and again when it's fixed.
 
 At most NASSCAN_NOTIFY_MAX_PER_HOUR messages go out in any hour (failed tries count, so a
 broken mail server isn't hammered); what's left waits and goes out together. Only paths,
@@ -23,7 +25,8 @@ from sqlalchemy.orm import Session
 
 from nasscan.config import Settings
 from nasscan.db import get_sessionmaker
-from nasscan.db.models import File, Finding, Notification, Report, ScanRun
+from nasscan.db.models import EngineStatus, File, Finding, Notification, Report, ScanRun
+from nasscan.health import PROBLEMS
 from nasscan.reports import weekly_summary
 from nasscan.scanner.base import Source
 
@@ -34,6 +37,15 @@ MAX_LINES = 10
 # Alerts and digests older than this when they could finally go out are dropped.
 GIVE_UP = timedelta(days=2)
 RANK = {"suspicious": 1, "malicious": 2}
+# A problem must last this long before it's notified: clamd takes minutes to load after a
+# restart, and the first YARA download runs at startup.
+HEALTH_GRACE = timedelta(minutes=30)
+HEALTH_LABELS = {
+    "clamav": "ClamAV",
+    "yara": "YARA",
+    "documents": "The document checks",
+    "backup": "The database backup",
+}
 NOTIFY_TYPES = {
     "info": apprise.NotifyType.INFO,
     "success": apprise.NotifyType.SUCCESS,
@@ -156,6 +168,54 @@ def compose_run(run: ScanRun, notifier: Notifier) -> tuple[str, str, str]:
     return title, "\n".join(lines), level
 
 
+Health = tuple[EngineStatus, str]  # a row and what to say about it
+
+
+def health_problems(
+    session: Session, settings: Settings, now: datetime
+) -> tuple[list[Health], list[Health]]:
+    """Rows whose problem should be notified now, and rows whose notified problem is over."""
+    problems, recovered = [], []
+    overdue = timedelta(hours=settings.backup_interval_hours * 2 + 1)
+    for row in session.scalars(select(EngineStatus).order_by(EngineStatus.name)):
+        # A backup service that stopped writing is a problem too.
+        silent = row.name == "backup" and row.checked_at < now - overdue
+        since = row.problem_since or row.checked_at
+        failing = row.status in PROBLEMS and since <= now - HEALTH_GRACE
+        if (silent or failing) and row.alerted_at is None:
+            message = row.message
+            if silent and not failing:
+                message = (
+                    f"no backup since {row.checked_at.astimezone():%Y-%m-%d %H:%M}; "
+                    "is the backup container running?"
+                )
+            problems.append((row, message))
+        elif not silent and row.status not in PROBLEMS and row.alerted_at is not None:
+            recovered.append((row, row.message))
+    return problems, recovered
+
+
+def compose_health(
+    problems: list[Health], recovered: list[Health], notifier: Notifier
+) -> tuple[str, str, str]:
+    def label(row: EngineStatus) -> str:
+        return HEALTH_LABELS.get(row.name, row.name)
+
+    if problems:
+        title = f"nasscan: {', '.join(label(r) for r, _ in problems)} needs attention"
+        lines = [f"• {label(r)}: {m}" for r, m in problems]
+        lines += [f"• {label(r)} is working again." for r, _ in recovered]
+        level = "warning"
+    else:
+        title = f"nasscan: {', '.join(label(r) for r, _ in recovered)} working again"
+        lines = [f"• {label(r)}: {m}" for r, m in recovered]
+        level = "success"
+    link = notifier.link("#/status")
+    if link:
+        lines += ["", link]
+    return title, "\n".join(lines), level
+
+
 def send_pending(session: Session, settings: Settings, notifier: Notifier, now: datetime) -> int:
     """One round: alerts first, then failed scans and digests, then reports, while the hourly
     cap allows. Returns how many messages went out."""
@@ -209,6 +269,18 @@ def send_pending(session: Session, settings: Settings, notifier: Notifier, now: 
             run.notified_at = now
             sent += 1
     session.commit()
+
+    # Engine and backup health.
+    problems, recovered = health_problems(session, settings, now)
+    if (problems or recovered) and budget > 0:
+        budget -= 1
+        if deliver(session, notifier, "health", *compose_health(problems, recovered, notifier)):
+            for row, _ in problems:
+                row.alerted_at = now
+            for row, _ in recovered:
+                row.alerted_at = None
+            sent += 1
+        session.commit()
 
     # Weekly reports.
     for report in session.scalars(select(Report).where(Report.notified_at.is_(None))).all():

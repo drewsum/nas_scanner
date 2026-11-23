@@ -1,6 +1,7 @@
 import asyncio
 import contextlib
 import logging
+import os
 import signal
 import time
 from datetime import datetime
@@ -57,6 +58,18 @@ async def _heartbeat(settings: Settings, stop: asyncio.Event) -> None:
             await asyncio.wait_for(stop.wait(), timeout=settings.scanner_tick_seconds)
 
 
+def reads_everything() -> bool | None:
+    """Whether this process may read any file (CAP_DAC_READ_SEARCH is effective); None when
+    that can't be told (not Linux)."""
+    try:
+        for line in Path("/proc/self/status").read_text().splitlines():
+            if line.startswith("CapEff:"):
+                return bool(int(line.split()[1], 16) & (1 << 2))
+    except OSError:
+        pass
+    return None
+
+
 async def run(settings: Settings) -> None:
     # Before any thread starts, so the scan workers inherit it.
     lower_priority(settings)
@@ -79,6 +92,16 @@ async def run(settings: Settings) -> None:
         next_run(settings.incremental_cron, now).isoformat(timespec="minutes"),
         next_run(settings.full_cron, now).isoformat(timespec="minutes"),
     )
+    everything = reads_everything()
+    if everything:
+        log.info("reading every file under the scan root (read-only, whatever its permissions)")
+    elif everything is False:
+        log.info(
+            "reading only files uid %d may read; others are listed as errors%s",
+            os.getuid(),
+            "" if not settings.scanner_read_all else
+            " (start it with deploy/scanner/start.sh to read them all)",
+        )  # fmt: skip
     active = [s for s in sources if s.enabled()]
     for s in sources:
         log.info("source %s: %s", s.name, "enabled" if s in active else "disabled")

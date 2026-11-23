@@ -19,6 +19,7 @@ x-nasscan-env: &nasscan-env
   NASSCAN_MAX_READ_MBPS: ${NASSCAN_MAX_READ_MBPS:-}
   NASSCAN_SCANNER_NICE: ${NASSCAN_SCANNER_NICE:-}
   NASSCAN_SCANNER_IONICE_IDLE: ${NASSCAN_SCANNER_IONICE_IDLE:-}
+  NASSCAN_SCANNER_READ_ALL: ${NASSCAN_SCANNER_READ_ALL:-}
   NASSCAN_MEMORY_READ_MB: ${NASSCAN_MEMORY_READ_MB:-}
   NASSCAN_LARGE_FILE_MB: ${NASSCAN_LARGE_FILE_MB:-}
   NASSCAN_PARTIAL_CHUNK_MB: ${NASSCAN_PARTIAL_CHUNK_MB:-}
@@ -70,7 +71,8 @@ x-logging: &logging
     max-file: "3"
 
 # The app containers run as the image's non-root user, with every capability dropped and a
-# read-only filesystem; only /tmp (and the volumes below) can be written.
+# read-only filesystem; only /tmp (and the volumes below) can be written. no-new-privileges:
+# nothing they run can gain privileges (setuid binaries don't work). docs/security.md.
 x-app: &app
   # Rewritten by .github/workflows/release.yml on every push to main; keep it on one line.
   image: ${NASSCAN_IMAGE:-ghcr.io/drewsum/nas_scanner:sha-73cee47}
@@ -80,6 +82,8 @@ x-app: &app
   cap_drop: [ALL]
   read_only: true
   tmpfs: [/tmp]
+  security_opt: [no-new-privileges:true]
+  pids_limit: 256
   mem_limit: ${NASSCAN_APP_MEMORY_LIMIT:-1g}
 
 services:
@@ -91,6 +95,12 @@ services:
       POSTGRES_DB: ${POSTGRES_DB:?set POSTGRES_DB}
     volumes:
       - ${NASSCAN_DATA_DIR:?set NASSCAN_DATA_DIR to the app dataset path}/db:/var/lib/postgresql/data
+    # The image's entrypoint starts as root to prepare the data directory, then runs Postgres
+    # as the postgres user. These are the capabilities that takes.
+    cap_drop: [ALL]
+    cap_add: [CHOWN, DAC_OVERRIDE, FOWNER, SETUID, SETGID]
+    security_opt: [no-new-privileges:true]
+    pids_limit: 512
     healthcheck:
       # Over TCP: during first-run init, Postgres listens only on its socket.
       test: ["CMD-SHELL", "pg_isready -h 127.0.0.1 -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
@@ -127,7 +137,12 @@ services:
 
   scanner:
     <<: *app
-    command: ["nasscan", "scanner"]
+    # Starts as root with these four capabilities only, then switches to the nasscan user
+    # keeping DAC_READ_SEARCH alone: it can read every file, including private folders, and
+    # write none (deploy/scanner/start.sh). NASSCAN_SCANNER_READ_ALL=false keeps nothing.
+    user: "0"
+    command: ["nasscan-scanner-start"]
+    cap_add: [DAC_READ_SEARCH, SETUID, SETGID, SETPCAP]
     # The NAS data, read-only: the scanner reports and never changes a file.
     volumes:
       - ${NASSCAN_SCAN_ROOT:?set NASSCAN_SCAN_ROOT to the dataset path to scan}:/scan:ro
@@ -161,6 +176,8 @@ services:
     # container has no access to the NAS data.
     cap_drop: [ALL]
     cap_add: [CHOWN, DAC_OVERRIDE, FOWNER, SETUID, SETGID]
+    security_opt: [no-new-privileges:true]
+    pids_limit: 256
     healthcheck:
       test: ["CMD", "clamdcheck.sh"]
       interval: 60s
