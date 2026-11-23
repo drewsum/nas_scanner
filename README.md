@@ -16,6 +16,13 @@ provider status, and Scan now (new and changed files, everything, or one folder)
 out by email or any Apprise service, with a printable report per scan, a weekly report, and
 CSV/JSON exports ([how](docs/notifications.md)).
 
+## How it works
+
+[![System flow: the NAS, the scanner's crawler, engines, threat intel, verdicts and alerts, the database and web UI, and the internet services it uses](docs/system-flow.png)](https://drewsum.github.io/nas_scanner/system-flow.html)
+
+Click the map for the [interactive version](https://drewsum.github.io/nas_scanner/system-flow.html):
+step through a scan with the dock or the arrow keys, from queueing it to alerts and review.
+
 Built the same way as [network_mapper](https://github.com/drewsum/network_mapper): Python 3.12
 (FastAPI, SQLAlchemy, Alembic) with uv, PostgreSQL, and a React + Vite UI, all in one image
 whose role (`api`, `scanner`, `migrate`, `backup`) compose picks.
