@@ -1,5 +1,6 @@
 import { useQuery } from "@tanstack/react-query";
 import { api } from "./api";
+import { ago } from "./util";
 
 export const ENGINE_LABELS: Record<string, string> = {
   clamav: "ClamAV",
@@ -20,15 +21,6 @@ export const ENGINE_LABELS: Record<string, string> = {
   otx: "AlienVault OTX",
   opentip: "Kaspersky OpenTIP",
 };
-
-export function ago(iso: string | null): string {
-  if (!iso) return "never";
-  const minutes = (Date.now() - new Date(iso).getTime()) / 60_000;
-  if (minutes < 2) return "just now";
-  if (minutes < 120) return `${Math.round(minutes)} min ago`;
-  if (minutes < 2880) return `${Math.round(minutes / 60)} h ago`;
-  return `${Math.round(minutes / 1440)} days ago`;
-}
 
 function age(iso: string | null): string {
   if (!iso) return "";

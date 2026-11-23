@@ -91,6 +91,20 @@ class ScanRun(Base):
 FILE_STATUSES = ("active", "removed", "error")
 
 
+class ScanError(Base):
+    """A file or folder a scan couldn't read, kept for the run's detail page. A run keeps its
+    first few hundred; ScanRun.errors counts them all."""
+
+    __tablename__ = "scan_errors"
+    __table_args__ = (Index("scan_errors_run", "run_id", "id"),)
+
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
+    run_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("scan_runs.id", ondelete="CASCADE"))
+    path: Mapped[str] = mapped_column(Text)
+    message: Mapped[str] = mapped_column(Text)
+    at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+
+
 class File(Base):
     __tablename__ = "files"
     __table_args__ = (
@@ -106,6 +120,13 @@ class File(Base):
         ),
         Index("files_intel_candidates", "sha256", postgresql_where=text("intel_priority > 0")),
         Index("files_verdict_pending", "id", postgresql_where=text("verdict_pending")),
+        # Path substring search (pg_trgm), for the file search page.
+        Index(
+            "files_path_trgm",
+            "path",
+            postgresql_using="gin",
+            postgresql_ops={"path": "gin_trgm_ops"},
+        ),
     )
 
     id: Mapped[int] = mapped_column(BigInteger, primary_key=True)

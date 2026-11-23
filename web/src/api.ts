@@ -54,7 +54,7 @@ export type Severity = "info" | "suspicious" | "malicious";
 
 export type Verdict = "suspicious" | "malicious";
 export type FindingStatus = "open" | "acknowledged" | "ignored" | "allowlisted" | "resolved";
-export type FindingFilter = "active" | "ignored" | "allowlisted" | "resolved" | "all";
+export type FindingFilter = "active" | "open" | "acknowledged" | "ignored" | "allowlisted" | "resolved" | "all";
 
 export interface EvidenceItem {
   engine: string;
@@ -100,7 +100,76 @@ export interface AllowlistEntry {
   created_at: string;
 }
 
-/** Fired when the API answers 401, so the app can show the login page. */
+export interface ScanError {
+  id: number;
+  path: string;
+  message: string;
+  at: string;
+}
+
+export interface FileRow {
+  id: number;
+  path: string;
+  size: number;
+  status: string;
+  mime: string | null;
+  sha256: string | null;
+  last_scanned: string | null;
+  verdict: Verdict | null;
+  finding_status: FindingStatus | null;
+}
+
+export interface FileSearch {
+  files: FileRow[];
+  match: "hash" | "path";
+  truncated: boolean;
+}
+
+export interface FileStats {
+  files: number;
+  bytes: number;
+  read_partly: number;
+  unreadable: number;
+  removed: number;
+  with_detections: number;
+  last_scanned: string | null;
+}
+
+export interface FileDetail {
+  id: number;
+  path: string;
+  extension: string | null;
+  size: number;
+  mtime: string;
+  status: string;
+  error: string | null;
+  mime: string | null;
+  magic: string | null;
+  sha256: string | null;
+  sha1: string | null;
+  md5: string | null;
+  scan_mode: string | null;
+  first_seen: string;
+  last_seen: string;
+  last_scanned: string | null;
+  removed_at: string | null;
+  last_seen_run_id: number | null;
+  finding: { id: number; verdict: Verdict; score: number; status: FindingStatus } | null;
+  detections: {
+    engine: string;
+    name: string;
+    member: string;
+    severity: Severity;
+    description: string | null;
+    link: string | null;
+    first_seen: string;
+    last_seen: string;
+  }[];
+  lookups: { provider: string; verdict: string; name: string | null; looked_up_at: string }[];
+  feeds: { feed: string; name: string | null; hash_type: string }[];
+  history: { at: string; what: string }[];
+}
+
 export interface IntelProvider {
   name: string;
   kind: "feed" | "lookup";
@@ -118,6 +187,7 @@ export interface IntelProvider {
   details: { pending?: number } | null;
 }
 
+/** Fired when the API answers 401, so the app can show the login page. */
 export const UNAUTHORIZED_EVENT = "nasscan:unauthorized";
 
 async function request<T>(method: string, path: string, body?: unknown): Promise<T> {
@@ -147,11 +217,15 @@ export const api = {
   session: () => get<Session>("/api/auth/session"),
   login: (password: string) => request<Session>("POST", "/api/auth/login", { password }),
   logout: () => request<Session>("POST", "/api/auth/logout"),
-  runs: () => get<ScanRun[]>("/api/runs?limit=20"),
+  runs: (limit = 20) => get<ScanRun[]>(`/api/runs?limit=${limit}`),
+  run: (id: number) => get<ScanRun>(`/api/runs/${id}`),
+  runErrors: (id: number) => get<ScanError[]>(`/api/runs/${id}/errors`),
   startRun: (kind: RunKind, path = "") => request<ScanRun>("POST", "/api/runs", { kind, path }),
   cancelRun: (id: number) => request<ScanRun>("POST", `/api/runs/${id}/cancel`),
   engines: () => get<EngineStatus[]>("/api/engines"),
-  findings: (status: FindingFilter) => get<Finding[]>(`/api/findings?status=${status}`),
+  findings: (status: FindingFilter, verdict = "", q = "", limit = 200) =>
+    get<Finding[]>(`/api/findings?${new URLSearchParams({ status, limit: String(limit), ...(verdict && { verdict }), ...(q && { q }) })}`),
+  finding: (id: number) => get<Finding>(`/api/findings/${id}`),
   findingSummary: () => get<FindingSummary>("/api/findings/summary"),
   setFindingStatus: (id: number, status: "open" | "acknowledged" | "ignored", note?: string) =>
     request<Finding>("POST", `/api/findings/${id}/status`, { status, note }),
@@ -160,4 +234,8 @@ export const api = {
     request<AllowlistEntry>("POST", "/api/allowlist", { kind, value, note }),
   deleteAllowlist: (id: number) => request<void>("DELETE", `/api/allowlist/${id}`),
   intel: () => get<IntelProvider[]>("/api/intel/providers"),
+  searchFiles: (q: string, includeRemoved: boolean) =>
+    get<FileSearch>(`/api/files?${new URLSearchParams({ q, include_removed: String(includeRemoved) })}`),
+  fileStats: () => get<FileStats>("/api/files/stats"),
+  file: (id: number) => get<FileDetail>(`/api/files/${id}`),
 };
