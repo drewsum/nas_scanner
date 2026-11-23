@@ -26,6 +26,7 @@ from sqlalchemy.orm import Session, sessionmaker
 from nasscan.config import Settings
 from nasscan.db.models import Detection, File, ScanError, ScanRun
 from nasscan.intel.priority import priority_for
+from nasscan.reports import snapshot_versions
 from nasscan.scanner.engines import LOCAL_ENGINE_NAMES, Pipeline, ScanResult
 from nasscan.scanner.engines.base import FileContext
 from nasscan.scanner.hashing import ReadResult, Stopped, Throttle, read_file
@@ -479,6 +480,7 @@ class Crawler:
                     updated_at=now,
                     current_path=None,
                     message=message,
+                    versions=snapshot_versions(session),
                 )
             )
             session.commit()

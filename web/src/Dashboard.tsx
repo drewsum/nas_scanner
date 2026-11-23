@@ -2,6 +2,7 @@ import { useQuery } from "@tanstack/react-query";
 import type { ReactNode } from "react";
 import { api } from "./api";
 import { OpenFindings } from "./Findings";
+import { Masthead } from "./Masthead";
 import { isActive, RUN_STATUS_CLASS, RunsTable, ScanControls, useRuns } from "./Runs";
 import { ago, formatBytes, when } from "./util";
 
@@ -110,6 +111,7 @@ export function Dashboard() {
   const stats = useQuery({ queryKey: ["file-stats"], queryFn: api.fileStats, refetchInterval: 60_000 });
   return (
     <div className="page">
+      <Masthead />
       <div className="tiles">
         <ThreatsTile />
         <InventoryTile />

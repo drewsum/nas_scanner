@@ -6,6 +6,7 @@ machine and on the TrueNAS host.
 """
 
 from functools import lru_cache
+from typing import Literal
 
 from croniter import croniter
 from pydantic import Field, SecretStr, field_validator
@@ -121,6 +122,21 @@ class Settings(BaseSettings):
     # Hashes a known-good list (NSRL via CIRCL) holds, with no malicious detection, have their
     # score multiplied by this (1: no effect).
     verdict_known_good_factor: float = Field(default=0.5, ge=0, le=1)
+
+    # --- Notifications and reports ---
+    # Apprise URLs, comma or space separated: mailto://user:app-password@gmail.com, ntfy://,
+    # discord://... (github.com/caronc/apprise/wiki). Unset: no notifications.
+    apprise_urls: SecretStr | None = None
+    # This app's address as you open it, for links in notifications (http://nas:8010).
+    public_url: str | None = None
+    # Alert on new findings at least this bad: suspicious or malicious.
+    notify_min_verdict: Literal["suspicious", "malicious"] = "suspicious"
+    # Notifications a rolling hour; past that, new findings wait and go out together.
+    notify_max_per_hour: int = Field(default=6, ge=1)
+    # A summary after every finished scan (failed scans always notify).
+    notify_digest: bool = False
+    # Send the weekly report when it's made (after the scheduled full scan).
+    notify_weekly_report: bool = True
 
     # Password for the web UI and API. Unset leaves both open to anyone on the LAN.
     admin_password: SecretStr | None = None

@@ -9,6 +9,8 @@ from pathlib import Path
 from nasscan.config import Settings
 from nasscan.findings import VerdictSource
 from nasscan.intel.sources import intel_sources
+from nasscan.notify import NotifySource
+from nasscan.reports import ReportSource
 from nasscan.scanner.base import Source
 from nasscan.scanner.priority import lower_priority
 from nasscan.scanner.runner import ScanRunnerSource
@@ -24,6 +26,8 @@ SOURCE_TYPES: list[type[Source]] = [
     YaraUpdateSource,
     EngineStatusSource,
     VerdictSource,
+    ReportSource,
+    NotifySource,
 ]
 
 

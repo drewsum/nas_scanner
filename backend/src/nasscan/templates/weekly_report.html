@@ -1,0 +1,74 @@
+{% extends "base.html" %}
+{% block title %}Weekly report to {{ report.period_end | when }} · NAS Scanner{% endblock %}
+{% block mast %}weekly report :: {{ report.period_start | when }} &rarr; {{ report.period_end | when }}{% endblock %}
+{% block body %}
+{% set open_now = d.status_counts.get("open", 0) %}
+<h1>Weekly report</h1>
+<p class="muted">
+  {{ report.period_start | when }} to {{ report.period_end | when }}{% if report.run_id %}, made after scan {{ report.run_id }}{% endif %}.
+  {% if link %}<a href="{{ link }}" class="noprint">All reports</a>{% endif %}
+</p>
+
+<div class="tiles">
+  <div class="tile"><div class="v {{ 'bad' if open_now else 'ok' }}">{{ open_now }}</div><div class="l">findings open now</div></div>
+  <div class="tile"><div class="v">{{ d.opened.get("malicious", 0) }} / {{ d.opened.get("suspicious", 0) }}</div><div class="l">new this week: malicious / suspicious</div></div>
+  <div class="tile"><div class="v">{{ d.resolved }}</div><div class="l">resolved this week</div></div>
+  <div class="tile"><div class="v">{{ d.files | number }}</div><div class="l">files on the NAS, {{ d.bytes | bytes }}</div></div>
+  <div class="tile"><div class="v">{{ d.files_read | number }}</div><div class="l">read this week{% if d.files %} ({{ (100 * d.files_read / d.files) | round | int }}%){% endif %}</div></div>
+  <div class="tile"><div class="v">{{ d.files_new | number }} / {{ d.files_removed | number }}</div><div class="l">new / removed files</div></div>
+</div>
+{% if d.unreadable %}<p class="warn">{{ d.unreadable | number }} files couldn't be read at their last scan.</p>{% endif %}
+
+<h2>Needs attention</h2>
+{% if d.active %}
+<table>
+  <thead><tr><th>File</th><th>Verdict</th><th class="n">Score</th><th>Status</th><th>Opened</th><th>Why</th></tr></thead>
+  <tbody>
+  {% for f in d.active %}
+    <tr>
+      <td class="mono wrap">{{ f.path }}{% if f.file_status == "removed" %} <span class="muted">(removed)</span>{% endif %}</td>
+      <td><span class="tag {{ f.verdict }}">{{ f.verdict }}</span></td>
+      <td class="n">{{ f.score }}</td>
+      <td>{{ f.status }}</td>
+      <td>{{ f.opened_at | when }}</td>
+      <td class="small">{{ f.evidence | join("; ") }}</td>
+    </tr>
+  {% endfor %}
+  </tbody>
+</table>
+{% if d.more_active %}<p class="muted small">The first {{ d.active | length }} are listed.</p>{% endif %}
+{% else %}
+<p class="ok">Nothing open or acknowledged. All clear.</p>
+{% endif %}
+{% if d.status_counts.get("ignored") or d.status_counts.get("allowlisted") %}
+<p class="muted small">Also {{ d.status_counts.get("ignored", 0) }} ignored and {{ d.status_counts.get("allowlisted", 0) }} allowlisted.</p>
+{% endif %}
+
+<h2>Scans this week</h2>
+{% if d.runs %}
+<table>
+  <thead><tr><th>Scan</th><th>Status</th><th>Started</th><th>Took</th><th class="n">Files</th><th class="n">New</th><th class="n">Changed</th><th class="n">Removed</th><th class="n">Read</th><th class="n">Flagged</th><th class="n">Errors</th></tr></thead>
+  <tbody>
+  {% for r in d.runs %}
+    <tr>
+      <td>#{{ r.id }} {{ r.kind }}{% if r.root %} <span class="mono">{{ r.root }}</span>{% endif %}</td>
+      <td><span class="tag {{ r.status }}">{{ r.status }}</span></td>
+      <td>{{ r.started_at | when }}</td>
+      <td>{{ took(r.started_at, r.finished_at) }}</td>
+      <td class="n">{{ r.files_seen | number }}</td>
+      <td class="n">{{ r.files_new | number }}</td>
+      <td class="n">{{ r.files_changed | number }}</td>
+      <td class="n">{{ r.files_removed | number }}</td>
+      <td class="n">{{ r.bytes_hashed | bytes }}</td>
+      <td class="n {{ 'bad' if r.files_flagged }}">{{ r.files_flagged | number }}</td>
+      <td class="n {{ 'warn' if r.errors }}">{{ r.errors | number }}</td>
+    </tr>
+  {% endfor %}
+  </tbody>
+</table>
+{% else %}
+<p class="bad">No scans ran this week.</p>
+{% endif %}
+
+{% with versions = d.versions, versions_live = false %}{% include "_versions.html" %}{% endwith %}
+{% endblock %}

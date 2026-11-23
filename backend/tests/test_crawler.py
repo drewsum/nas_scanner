@@ -66,6 +66,7 @@ def test_first_scan_inventories_everything(scan_root):
     run = scan()
     assert run.status == "completed", run.message
     assert (run.files_seen, run.files_new, run.files_hashed, run.bytes_hashed) == (2, 2, 2, 5008)
+    assert set(run.versions) == {"engines", "intel"}  # recorded for the run's report
     f = files()
     assert set(f) == {"docs/a.pdf", "movies/m.mkv"}
     m = f["movies/m.mkv"]

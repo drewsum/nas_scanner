@@ -170,6 +170,40 @@ export interface FileDetail {
   history: { at: string; what: string }[];
 }
 
+export interface ReportItem {
+  id: number;
+  kind: string;
+  run_id: number | null;
+  period_start: string;
+  period_end: string;
+  created_at: string;
+  notified_at: string | null;
+  open_findings: number;
+  opened: Partial<Record<Verdict, number>>;
+  scans: number;
+}
+
+export interface NotificationItem {
+  id: number;
+  kind: string;
+  title: string;
+  body: string;
+  ok: boolean;
+  error: string | null;
+  created_at: string;
+}
+
+export interface NotifyStatus {
+  configured: boolean;
+  services: number;
+  links: boolean;
+  min_verdict: Verdict;
+  max_per_hour: number;
+  digest: boolean;
+  weekly_report: boolean;
+  recent: NotificationItem[];
+}
+
 export interface IntelProvider {
   name: string;
   kind: "feed" | "lookup";
@@ -236,6 +270,10 @@ export const api = {
   intel: () => get<IntelProvider[]>("/api/intel/providers"),
   searchFiles: (q: string, includeRemoved: boolean) =>
     get<FileSearch>(`/api/files?${new URLSearchParams({ q, include_removed: String(includeRemoved) })}`),
+  reports: () => get<ReportItem[]>("/api/reports"),
+  makeReport: () => request<ReportItem>("POST", "/api/reports"),
+  notifyStatus: () => get<NotifyStatus>("/api/notify"),
+  notifyTest: () => request<{ ok: boolean; error: string | null }>("POST", "/api/notify/test"),
   fileStats: () => get<FileStats>("/api/files/stats"),
   file: (id: number) => get<FileDetail>(`/api/files/${id}`),
 };

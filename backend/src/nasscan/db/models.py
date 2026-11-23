@@ -85,6 +85,10 @@ class ScanRun(Base):
     current_path: Mapped[str | None] = mapped_column(Text)
     last_error: Mapped[str | None] = mapped_column(Text)
     message: Mapped[str | None] = mapped_column(Text)
+    # At the end of the run: engine versions and signature dates, feed sizes. For its report.
+    versions: Mapped[dict | None] = mapped_column(JSONB)
+    # When its digest (or failure notice) went out, or was found not to be needed.
+    notified_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 
 
 # active: present at the last scan; removed: gone since; error: couldn't be read.
@@ -313,6 +317,8 @@ class Finding(Base):
     verdict_changed_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
     resolved_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    # When an alert last went out for it; it's due again once opened_at passes this.
+    alerted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 
 
 ALLOWLIST_KINDS = ("sha256", "path")
@@ -330,3 +336,36 @@ class AllowlistEntry(Base):
     value: Mapped[str] = mapped_column(Text)
     note: Mapped[str | None] = mapped_column(Text)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
+class Notification(Base):
+    """Everything sent (or tried) through Apprise: alerts, digests, reports, tests."""
+
+    __tablename__ = "notifications"
+    __table_args__ = (Index("notifications_created", "created_at"),)
+
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
+    kind: Mapped[str] = mapped_column(String(16))  # alert | scan | weekly | test
+    title: Mapped[str] = mapped_column(Text)
+    body: Mapped[str] = mapped_column(Text)
+    ok: Mapped[bool] = mapped_column(Boolean)
+    error: Mapped[str | None] = mapped_column(Text)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+
+
+class Report(Base):
+    """A stored weekly report: its figures, rendered to HTML when viewed."""
+
+    __tablename__ = "reports"
+
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
+    kind: Mapped[str] = mapped_column(String(16), default="weekly")
+    # The scheduled full scan it followed, if any.
+    run_id: Mapped[int | None] = mapped_column(
+        BigInteger, ForeignKey("scan_runs.id", ondelete="SET NULL"), unique=True
+    )
+    period_start: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    period_end: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    data: Mapped[dict] = mapped_column(JSONB)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    notified_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
