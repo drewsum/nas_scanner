@@ -7,6 +7,7 @@ from datetime import datetime
 from pathlib import Path
 
 from nasscan.config import Settings
+from nasscan.intel.sources import intel_sources
 from nasscan.scanner.base import Source
 from nasscan.scanner.priority import lower_priority
 from nasscan.scanner.runner import ScanRunnerSource
@@ -53,7 +54,7 @@ async def _heartbeat(settings: Settings, stop: asyncio.Event) -> None:
 async def run(settings: Settings) -> None:
     # Before any thread starts, so the scan workers inherit it.
     lower_priority(settings)
-    sources = [cls(settings) for cls in SOURCE_TYPES]
+    sources = [cls(settings) for cls in SOURCE_TYPES] + intel_sources(settings)
     stop = asyncio.Event()
 
     def shutdown() -> None:

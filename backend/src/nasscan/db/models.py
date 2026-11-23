@@ -1,13 +1,17 @@
 """ORM models."""
 
-from datetime import datetime
+from datetime import date, datetime
 
 from sqlalchemy import (
     BigInteger,
+    Boolean,
+    Date,
     DateTime,
     ForeignKey,
     Index,
     Integer,
+    LargeBinary,
+    SmallInteger,
     String,
     Text,
     func,
@@ -89,7 +93,19 @@ FILE_STATUSES = ("active", "removed", "error")
 
 class File(Base):
     __tablename__ = "files"
-    __table_args__ = (Index("files_sha256", "sha256"), Index("files_status", "status"))
+    __table_args__ = (
+        Index("files_sha256", "sha256"),
+        Index("files_md5", "md5"),
+        Index("files_sha1", "sha1"),
+        Index("files_status", "status"),
+        # Files whose threat-intel evidence needs (re)applying: new or changed content.
+        Index(
+            "files_intel_pending",
+            "id",
+            postgresql_where=text("intel_checked_at IS NULL AND status = 'active'"),
+        ),
+        Index("files_intel_candidates", "sha256", postgresql_where=text("intel_priority > 0")),
+    )
 
     id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
     # Relative to the scan root, '/'-separated. Names that aren't valid UTF-8 are stored with
@@ -120,6 +136,12 @@ class File(Base):
     last_seen_run_id: Mapped[int | None] = mapped_column(
         BigInteger, ForeignKey("scan_runs.id", ondelete="SET NULL")
     )
+    # How much a live threat-intel lookup is worth spending on this file (0: none); see
+    # nasscan.intel.priority.
+    intel_priority: Mapped[int] = mapped_column(SmallInteger, default=0)
+    # When feed matches and cached lookups were last applied to it; cleared when the content
+    # changes.
+    intel_checked_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 
 
 # How sure an engine is: info (worth knowing), suspicious, malicious.
@@ -164,3 +186,65 @@ class EngineStatus(Base):
     signatures_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     details: Mapped[dict | None] = mapped_column(JSONB)
     checked_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+
+
+class FeedHash(Base):
+    """A hash listed by a downloaded threat feed (MalwareBazaar, VirusShare, ...)."""
+
+    __tablename__ = "feed_hashes"
+
+    # Raw bytes (16, 20 or 32 of them) to keep millions of rows small.
+    hash: Mapped[bytes] = mapped_column(LargeBinary, primary_key=True)
+    feed: Mapped[str] = mapped_column(String(32), primary_key=True)
+    name: Mapped[str | None] = mapped_column(Text)  # malware family or signature, if given
+    added_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    seen_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+
+
+# What a provider said about a hash. malicious/suspicious/info become detections; known_good
+# (NSRL and the like) keeps a hash away from the other providers.
+VERDICTS = ("malicious", "suspicious", "info", "clean", "known_good", "not_found")
+
+
+class HashLookup(Base):
+    """Cached answer from one live provider about one SHA-256."""
+
+    __tablename__ = "hash_lookups"
+    __table_args__ = (Index("hash_lookups_sha256", "sha256"),)
+
+    provider: Mapped[str] = mapped_column(String(32), primary_key=True)
+    sha256: Mapped[str] = mapped_column(String(64), primary_key=True)
+    verdict: Mapped[str] = mapped_column(String(16))
+    name: Mapped[str | None] = mapped_column(Text)
+    description: Mapped[str | None] = mapped_column(Text)
+    details: Mapped[dict | None] = mapped_column(JSONB)
+    looked_up_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+
+
+class IntelProvider(Base):
+    """Each feed's and lookup provider's state: health, freshness and quota use."""
+
+    __tablename__ = "intel_providers"
+
+    name: Mapped[str] = mapped_column(String(32), primary_key=True)
+    kind: Mapped[str] = mapped_column(String(16))  # feed | lookup
+    title: Mapped[str] = mapped_column(Text)
+    enabled: Mapped[bool] = mapped_column(Boolean, default=False)
+    status: Mapped[str] = mapped_column(String(16))  # ok | warning | error | disabled | idle
+    message: Mapped[str] = mapped_column(Text, default="")
+    last_success: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    last_attempt: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    last_error: Mapped[str | None] = mapped_column(Text)
+    last_error_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    # No requests before this (rate limited, key rejected, quota spent).
+    paused_until: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    # Requests made on `day` (UTC) against the daily budget.
+    day: Mapped[date | None] = mapped_column(Date)
+    requests_today: Mapped[int] = mapped_column(Integer, default=0)
+    daily_budget: Mapped[int | None] = mapped_column(Integer)
+    per_minute: Mapped[float | None] = mapped_column()
+    # Feeds: hashes held. Lookups: hashes answered in all.
+    entries: Mapped[int] = mapped_column(BigInteger, default=0)
+    details: Mapped[dict | None] = mapped_column(JSONB)
+    updated_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))

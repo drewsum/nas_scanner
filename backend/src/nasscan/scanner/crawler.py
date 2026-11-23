@@ -19,13 +19,14 @@ from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from pathlib import PurePosixPath
 
-from sqlalchemy import and_, delete, func, select, update
+from sqlalchemy import and_, case, delete, func, select, update
 from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.orm import Session, sessionmaker
 
 from nasscan.config import Settings
 from nasscan.db.models import Detection, File, ScanRun
-from nasscan.scanner.engines import Pipeline, ScanResult
+from nasscan.intel.priority import priority_for
+from nasscan.scanner.engines import LOCAL_ENGINE_NAMES, Pipeline, ScanResult
 from nasscan.scanner.engines.base import FileContext
 from nasscan.scanner.hashing import ReadResult, Stopped, Throttle, read_file
 from nasscan.scanner.walker import Excluder, FoundFile, WalkError, walk
@@ -59,6 +60,7 @@ class Scanned:
 
     read: ReadResult
     result: ScanResult
+    priority: int = 0  # for live threat-intel lookups
 
 
 @dataclass
@@ -273,7 +275,7 @@ class Crawler:
                 if findings:
                     counts.flagged += 1
                     counts.detections += len(findings)
-                file_id = self._upsert(session, run_id, item, result.read, now)
+                file_id = self._upsert(session, run_id, item, result.read, now, result.priority)
                 self._record_findings(session, run_id, file_id, result.result, now)
 
     def _read(self, item: FoundFile) -> Scanned | Exception:
@@ -300,7 +302,9 @@ class Crawler:
                 tail=read.tail,
                 throttle=self.throttle,
             )
-            return Scanned(read, self.pipeline.scan(ctx))
+            result = self.pipeline.scan(ctx)
+            ext = extension(item.path)
+            return Scanned(read, result, priority_for(ext, read.mime, result.findings))
         except (Stopped, OSError) as exc:
             return exc
 
@@ -331,7 +335,11 @@ class Crawler:
                     },
                 )
             )
-        stale = delete(Detection).where(Detection.file_id == file_id, Detection.last_seen < now)
+        stale = delete(Detection).where(
+            Detection.file_id == file_id,
+            Detection.last_seen < now,
+            Detection.engine.in_(LOCAL_ENGINE_NAMES | set(self.pipeline.names)),
+        )
         if result.errors:
             stale = stale.where(Detection.engine.not_in(list(result.errors)))
         session.execute(stale)
@@ -343,6 +351,7 @@ class Crawler:
         item: FoundFile,
         read: ReadResult | None,
         now: datetime,
+        priority: int = 0,
         error: str | None = None,
     ) -> int:
         digest = read.digest if read else None
@@ -366,11 +375,21 @@ class Crawler:
             "last_scanned": now if read else None,
             "removed_at": None,
             "last_seen_run_id": run_id,
+            "intel_priority": priority,
         }
         stmt = insert(File).values(**values)
         update_cols = {k: stmt.excluded[k] for k in values if k not in ("path", "first_seen")}
-        if not read:
-            update_cols.pop("last_scanned")  # keep when it was last read successfully
+        if read:
+            # New content: threat intel is applied again (and stale intel detections go).
+            table = File.__table__.c
+            update_cols["intel_checked_at"] = case(
+                (table.sha256.is_distinct_from(stmt.excluded.sha256), None),
+                else_=table.intel_checked_at,
+            )
+        else:
+            # Keep when it was last read successfully, and what intel knew then.
+            for col in ("last_scanned", "intel_priority", "sha256", "sha1", "md5"):
+                update_cols.pop(col)
         return session.scalar(
             stmt.on_conflict_do_update(index_elements=["path"], set_=update_cols).returning(File.id)
         )

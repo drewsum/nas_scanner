@@ -116,7 +116,17 @@ def make_dump(settings: Settings, now: datetime, run: Runner = subprocess.run) -
     try:
         _run(
             run,
-            [pg_dump, "--format=custom", "--file", str(partial), *conn, url.database or ""],
+            [
+                pg_dump,
+                "--format=custom",
+                # Downloaded threat feeds (millions of hashes) are fetched again after a
+                # restore instead of filling every backup.
+                "--exclude-table-data=feed_hashes",
+                "--file",
+                str(partial),
+                *conn,
+                url.database or "",
+            ],
             env,
         )
         partial.rename(final)
@@ -240,4 +250,21 @@ def restore(
     conn_args, env = pg_connection(_url(settings, target))
     pg_restore = str(Path(settings.pg_bin_dir) / "pg_restore")
     _run(run, [pg_restore, "--exit-on-error", *conn_args, "--dbname", target, str(dump)], env)
+    _forget_feeds(settings, target)
     return target
+
+
+def _forget_feeds(settings: Settings, database: str) -> None:
+    """Backups leave out the feed hashes; make the scanner download every feed again."""
+    engine = _admin_engine(settings, database)
+    try:
+        with engine.connect() as conn:
+            if conn.scalar(text("SELECT to_regclass('intel_providers')")) is not None:
+                conn.execute(
+                    text(
+                        "UPDATE intel_providers SET last_success = NULL, last_attempt = NULL,"
+                        " details = NULL, entries = 0 WHERE kind = 'feed'"
+                    )
+                )
+    finally:
+        engine.dispose()

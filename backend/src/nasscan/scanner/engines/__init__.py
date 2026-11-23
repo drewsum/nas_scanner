@@ -26,6 +26,9 @@ ENGINE_TYPES: list[type[Engine]] = [
     DocumentsEngine,
     PrintingEngine,
 ]
+# Detections from any other "engine" come from threat intel (nasscan.intel), which manages
+# them itself.
+LOCAL_ENGINE_NAMES = frozenset(cls.name for cls in ENGINE_TYPES)
 
 
 @dataclass
