@@ -1,6 +1,7 @@
-# GitOps: every push to main builds the image, pushes it to GHCR, and commits the new tag into
-# deploy/portainer-compose.yml. Portainer polls the repo and redeploys on that commit, so it
-# never redeploys onto an image that doesn't exist yet.
+# GitOps: every push to main builds the image, pushes it to GHCR, commits the new tag into
+# deploy/portainer-compose.yml, and moves the `deploy` branch to that commit. Portainer tracks
+# `deploy`, not main, so it only ever sees commits whose image exists: a merge that changes the
+# compose file and the code together can't be deployed with the previous image.
 #
 # No loops: the tag bump is pushed with GITHUB_TOKEN (whose pushes never trigger workflows),
 # says [skip ci], and runs by github-actions[bot] are skipped anyway.
@@ -107,7 +108,12 @@ jobs:
           git commit -m "deploy: ${TAG} [skip ci]"
           # Another push may have landed while the image built; the bump only touches one line.
           for _ in 1 2 3; do
-            git pull --rebase origin main && git push origin HEAD:main && exit 0
+            if git pull --rebase origin main && git push origin HEAD:main; then
+              # Only this workflow writes `deploy`, and runs are serialised, so it's always
+              # the latest bump; --force because it's a pointer, not a history.
+              git push --force origin HEAD:refs/heads/deploy
+              exit 0
+            fi
             sleep 5
           done
           exit 1
