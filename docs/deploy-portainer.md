@@ -9,12 +9,18 @@ push to main ──► Actions: ci checks ──► build + push ghcr.io/drewsum
                                           │
                                           └─► commit "deploy: sha-<short> [skip ci]"
                                               (rewrites the image: line in portainer-compose.yml)
-Portainer polls the repo every 5 min ──► sees the new commit ──► pulls the image, redeploys
+                                              to main, and move the deploy branch to it
+Portainer polls the deploy branch every 5 min ──► sees the new commit ──► pulls, redeploys
 ```
 
-Portainer only reacts to that tag-bump commit, so it never tries to deploy an image that is
-still building. The UI header shows the running commit (hover the API pill), so you can see when
-a redeploy has landed.
+Portainer tracks the `deploy` branch, which only ever points at a tag-bump commit, so it never
+deploys a merge before its image is built. (Tracking `main` instead would: a merge that changes
+the compose file along with the code would start with the previous image for a few minutes, and
+a container whose command is new fails to start.) Don't commit to `deploy` by hand; the release
+workflow moves it.
+
+The UI header shows the running commit (hover the API pill), so you can see when a redeploy has
+landed.
 
 | Service | Purpose |
 |---|---|
@@ -49,7 +55,8 @@ First prepare TrueNAS: the app's dataset, the scan root and exclusions, and memo
 
 In Portainer: **Stacks → Add stack → Repository**.
 
-- Repository URL: `https://github.com/drewsum/nas_scanner`. Reference: `refs/heads/main`.
+- Repository URL: `https://github.com/drewsum/nas_scanner`. Reference: `refs/heads/deploy`.
+  (A stack made earlier on `refs/heads/main`: change it under the stack's *Git settings*.)
 - Authentication: off (public repo).
 - Compose path: `deploy/portainer-compose.yml`.
 - **GitOps updates: on.** Mechanism: *Polling*, interval `5m`. Turn on **Re-pull image**
