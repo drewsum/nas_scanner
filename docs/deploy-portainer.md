@@ -30,6 +30,9 @@ Both images come from the same GHCR package: the app as `sha-<short>` and clamd 
 
 ## One-time setup
 
+First prepare TrueNAS: the app's dataset, the scan root and exclusions, and memory
+([deploy-truenas.md](deploy-truenas.md)).
+
 1. **GHCR package visibility.** After the first run of the release workflow, open the package
    (github.com/drewsum?tab=packages → `nas_scanner` → Package settings) and set its visibility to
    **Public**, so Portainer can pull without registry credentials. (New GHCR packages start
@@ -40,6 +43,7 @@ Both images come from the same GHCR package: the app as `sha-<short>` and clamd 
    start. Keep it outside the scan root, or the scanner will scan its own database.
 3. **Scan root.** Decide which host path the scanner sees, e.g. `/mnt/tank`. It is mounted
    read-only; the scanner never changes a file.
+4. **API keys** (optional, all free): see [below](#api-keys).
 
 ## Creating the stack
 
@@ -71,7 +75,7 @@ Same as `.env.example`, plus:
 | `NASSCAN_SCAN_ROOT` | Host path to scan, mounted read-only at `/scan`. Required. |
 | `NASSCAN_API_PUBLISH_PORT` | Host port for the API and UI (default 8010; network_mapper uses 8000). Pick one no other app uses. |
 | `NASSCAN_IMAGE` | Override the image (e.g. pin an older `sha-` tag to roll back). Normally unset. |
-| `NASSCAN_APP_MEMORY_LIMIT` / `NASSCAN_DB_MEMORY_LIMIT` | Memory limits per container (default `1g` / `1g`). |
+| `NASSCAN_APP_MEMORY_LIMIT` / `NASSCAN_DB_MEMORY_LIMIT` / `NASSCAN_CLAMD_MEMORY_LIMIT` | Memory limits per container (default `1g` / `1g` / `3g`). |
 
 Set `NASSCAN_ADMIN_PASSWORD` on the server: without it the UI and API are open to anyone on the
 LAN, and the UI warns about it. Changing it logs everyone out.
@@ -121,8 +125,10 @@ read whole. These files get no hashes, so threat intel skips them.
 **Memory.** clamd needs about 1.5 GB (`NASSCAN_CLAMD_MEMORY_LIMIT`, default 3g); the scanner
 holds up to `NASSCAN_SCAN_WORKERS` x `NASSCAN_MEMORY_READ_MB` of file data at once.
 
-**Permissions.** The scanner runs as uid 10001 and can only read files that user may read
-(world-readable ones, typically). Files it can't open are listed as errors on each scan.
+**Permissions.** The scanner reads every file whatever its permissions, read-only, keeping the
+one capability that allows it (`NASSCAN_SCANNER_READ_ALL`, on by default;
+[deploy-truenas.md](deploy-truenas.md#permissions)). Files it still can't open are listed as
+errors on each scan.
 
 ## Threat intel
 
@@ -174,6 +180,31 @@ plain documents never use quota.
   known-good answers after 90 days.
 - **Dashboard.** The **Threat intel** panel shows every source: on or off (and why), feed sizes,
   quota used today, the last success, and how many hashes wait.
+
+## API keys
+
+Every key is optional and free. Without any, the hash feeds that need no key (VirusShare),
+CIRCL and Team Cymru still run. Each key goes in the stack's environment variables; the
+**Threat intel** panel under **Status** shows whether it was accepted.
+
+| Variable | Where to get it |
+|---|---|
+| `NASSCAN_ABUSECH_AUTH_KEY` | [auth.abuse.ch](https://auth.abuse.ch/): sign in with an existing account (GitHub, Google and others), then generate an Auth-Key on your profile. One key covers MalwareBazaar, ThreatFox and YARAify, feeds and lookups. |
+| `NASSCAN_VIRUSTOTAL_API_KEY` | [virustotal.com](https://www.virustotal.com/gui/join-us): sign up, then your name (top right) → *API key*. |
+| `NASSCAN_HYBRID_ANALYSIS_API_KEY` | [hybrid-analysis.com](https://www.hybrid-analysis.com/signup): sign up, then create a key in your profile's API key section. |
+| `NASSCAN_METADEFENDER_API_KEY` | [metadefender.opswat.com](https://metadefender.opswat.com/): sign up; the key is on your account page. |
+| `NASSCAN_OTX_API_KEY` | [otx.alienvault.com](https://otx.alienvault.com/): sign up; the key is on your settings page (*OTX Key*). |
+| `NASSCAN_OPENTIP_API_KEY` | [opentip.kaspersky.com](https://opentip.kaspersky.com/): sign in, then request a token in your account's API section. |
+
+The keys only allow lookups, and only hashes are sent ([security.md](security.md#what-leaves-the-nas)).
+Update the stack after adding one; the scanner picks it up on restart.
+
+## Health and backups
+
+Every long-running container has a health check, and the scanner sends a notification when
+an engine or the backups stop working ([deploy-truenas.md](deploy-truenas.md#health-checks)).
+The database is dumped daily; restoring is described in [backups.md](backups.md). How the
+containers are locked down is in [security.md](security.md).
 
 ## Rolling back
 

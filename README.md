@@ -38,4 +38,11 @@ the built UI on :8010.
 
 Every push to `main` runs the checks, builds `ghcr.io/drewsum/nas_scanner:sha-<short>` (and
 `:latest`), and commits that tag into `deploy/portainer-compose.yml`. Portainer, polling the repo,
-redeploys within about five minutes. Setup: [docs/deploy-portainer.md](docs/deploy-portainer.md).
+redeploys within about five minutes.
+
+- [Deploying on TrueNAS](docs/deploy-truenas.md): the dataset, scan root, exclusions, memory
+- [The Portainer stack](docs/deploy-portainer.md): GitOps, settings, engines, threat intel, API keys
+- [Notifications, reports and exports](docs/notifications.md)
+- [Backups and restore](docs/backups.md)
+- [Security](docs/security.md): what leaves the NAS, container privileges, HTTPS
+- [How verdicts are worked out](docs/verdicts.md)

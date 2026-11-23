@@ -21,6 +21,7 @@ from sqlalchemy import create_engine, text
 from sqlalchemy.engine import URL, make_url
 from sqlalchemy.pool import NullPool
 
+from nasscan import health
 from nasscan.config import Settings
 from nasscan.db import get_engine
 
@@ -173,6 +174,10 @@ def backup_once(settings: Settings, now: datetime, run: Runner = subprocess.run)
     except (BackupError, OSError) as exc:
         log.error("backup failed: %s", exc)
         result = CheckResult("warning", f"The database backup failed: {exc}", {"error": str(exc)})
+    try:
+        health.record("backup", result.status, result.message, details=result.details)
+    except Exception as exc:  # the dump matters more than its status row
+        log.warning("can't record the backup status: %s", exc)
     # Hold no connection between runs, so `nasscan restore` finds the database free.
     get_engine().dispose()
     return result
