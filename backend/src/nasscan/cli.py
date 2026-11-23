@@ -111,7 +111,14 @@ def main(argv: list[str] | None = None) -> None:
         level=get_settings().log_level.upper(),
         format="%(asctime)s %(levelname)s %(name)s: %(message)s",
     )
+    quiet_http_logs()
     args.func(args)
+
+
+def quiet_http_logs() -> None:
+    """httpx logs every request URL at INFO, and abuse.ch puts its key in the URL path."""
+    for name in ("httpx", "httpcore"):
+        logging.getLogger(name).setLevel(logging.WARNING)
 
 
 if __name__ == "__main__":

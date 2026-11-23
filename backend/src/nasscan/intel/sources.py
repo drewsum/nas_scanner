@@ -124,13 +124,24 @@ class FeedSource(Source):
         state = dict(details.get("state", {}))
         folder = Path(self.settings.data_dir) / "feeds"
         imported, added, removed, labels = 0, 0, 0, []
+        fell_back = ""
         try:
             downloads = feed.downloads(state, self.client)
             for download in downloads:
                 if self.stopping.is_set():
                     return
                 log.info("feed %s: downloading %s", feed.name, download.label)
-                path = fetch(self.client, download, folder / f"{feed.name}.download")
+                dest = folder / f"{feed.name}.download"
+                try:
+                    path = fetch(self.client, download, dest, stop=self.stopping)
+                except FeedError as exc:
+                    smaller = feed.fallback(download)
+                    if smaller is None:
+                        raise
+                    log.warning("feed %s: %s; fetching %s instead", feed.name, exc, smaller.label)
+                    fell_back = f"{download.label} failed ({str(exc)[:150]}); "
+                    download = smaller
+                    path = fetch(self.client, download, dest, stop=self.stopping)
                 try:
                     with sessions() as session:
                         result = store.import_feed(
@@ -168,8 +179,12 @@ class FeedSource(Source):
         with sessions() as session:
             row = store.ensure_provider(session, feed.name, "feed", feed.title)
             now = datetime.now(UTC)
-            row.status, row.last_success, row.updated_at = "ok", now, now
-            row.message = (
+            row.status, row.last_success, row.updated_at = (
+                "warning" if fell_back else "ok",
+                now,
+                now,
+            )
+            row.message = fell_back + (
                 f"{row.entries:,} hashes; last refresh read {imported:,} "
                 f"({added:,} new, {removed:,} dropped)"
             )
