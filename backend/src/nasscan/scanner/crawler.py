@@ -19,13 +19,15 @@ from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from pathlib import PurePosixPath
 
-from sqlalchemy import and_, func, select, update
+from sqlalchemy import and_, delete, func, select, update
 from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.orm import Session, sessionmaker
 
 from nasscan.config import Settings
-from nasscan.db.models import File, ScanRun
-from nasscan.scanner.hashing import FileDigest, Stopped, Throttle, digest_file
+from nasscan.db.models import Detection, File, ScanRun
+from nasscan.scanner.engines import Pipeline, ScanResult
+from nasscan.scanner.engines.base import FileContext
+from nasscan.scanner.hashing import ReadResult, Stopped, Throttle, read_file
 from nasscan.scanner.walker import Excluder, FoundFile, WalkError, walk
 
 log = logging.getLogger(__name__)
@@ -52,6 +54,14 @@ def under(path: str, folder: str) -> bool:
 
 
 @dataclass
+class Scanned:
+    """A file read and scanned, ready to record."""
+
+    read: ReadResult
+    result: ScanResult
+
+
+@dataclass
 class Counts:
     seen: int = 0
     new: int = 0
@@ -61,8 +71,13 @@ class Counts:
     bytes_seen: int = 0
     bytes_hashed: int = 0
     errors: int = 0
+    flagged: int = 0
+    detections: int = 0
     last_error: str | None = None
     error_dirs: list[str] = field(default_factory=list)
+    # Files each engine couldn't scan (clamd down, no rules yet), and the last reason.
+    engine_errors: dict[str, int] = field(default_factory=dict)
+    engine_last_error: dict[str, str] = field(default_factory=dict)
 
     def error(self, message: str) -> None:
         self.errors += 1
@@ -88,12 +103,21 @@ class Crawler:
         settings: Settings,
         sessions: sessionmaker[Session],
         stop: threading.Event | None = None,
+        pipeline: Pipeline | None = None,
     ) -> None:
         self.settings = settings
         self.sessions = sessions
         self.stop = stop or threading.Event()
         self.throttle = Throttle(settings.max_read_mbps)
         self.exclude = Excluder(settings.exclude_patterns)
+        self.pipeline = pipeline if pipeline is not None else Pipeline(settings)
+        mb = 1024 * 1024
+        self.read_options = {
+            "memory_limit": settings.memory_read_mb * mb,
+            "large_limit": settings.large_file_mb * mb,
+            "piece": settings.partial_chunk_mb * mb,
+            "full_media": settings.large_media_full_read,
+        }
         self._base = Counts()
 
     # --- the run ---------------------------------------------------------------------------
@@ -114,9 +138,17 @@ class Crawler:
                 bytes_seen=run.bytes_seen,
                 bytes_hashed=run.bytes_hashed,
                 errors=run.errors,
+                flagged=run.files_flagged,
+                detections=run.detections,
                 last_error=run.last_error,
             )
-        log.info("scan %d (%s%s) started", run_id, kind, f" of {root}" if root else "")
+        log.info(
+            "scan %d (%s%s) started; engines: %s",
+            run_id,
+            kind,
+            f" of {root}" if root else "",
+            ", ".join(self.pipeline.names) or "none",
+        )
         try:
             self._check_root(root)
             counts = self._walk(run_id, kind, root)
@@ -132,8 +164,11 @@ class Crawler:
         message = (
             f"{b.seen + counts.seen} files: {b.new + counts.new} new, "
             f"{b.changed + counts.changed} changed, {removed} removed, "
-            f"{b.hashed + counts.hashed} read, {b.errors + counts.errors} errors."
+            f"{b.hashed + counts.hashed} read, {b.flagged + counts.flagged} flagged, "
+            f"{b.errors + counts.errors} errors."
         )
+        for engine, n in sorted(counts.engine_errors.items()):
+            message += f" {engine} skipped {n} files ({counts.engine_last_error[engine]})."
         self._finish(run_id, "completed", message)
         log.info("scan %d completed: %s", run_id, message)
 
@@ -202,7 +237,7 @@ class Crawler:
                 or row.mtime_ns != item.mtime_ns
                 or row.inode != item.inode
                 or row.status != "active"
-                or row.sha256 is None
+                or row.last_scanned is None
             )
             if row is None:
                 counts.new += 1
@@ -230,24 +265,87 @@ class Crawler:
                 self._upsert(session, run_id, item, None, now, error=message)
             else:
                 counts.hashed += 1
-                counts.bytes_hashed += result.size
-                self._upsert(session, run_id, item, result, now)
+                counts.bytes_hashed += result.read.bytes_read
+                for engine, reason in result.result.errors.items():
+                    counts.engine_errors[engine] = counts.engine_errors.get(engine, 0) + 1
+                    counts.engine_last_error[engine] = reason[:300]
+                findings = result.result.findings
+                if findings:
+                    counts.flagged += 1
+                    counts.detections += len(findings)
+                file_id = self._upsert(session, run_id, item, result.read, now)
+                self._record_findings(session, run_id, file_id, result.result, now)
 
-    def _read(self, item: FoundFile) -> FileDigest | Exception:
+    def _read(self, item: FoundFile) -> Scanned | Exception:
+        """Read one file and run the engines over it (in a worker thread)."""
         try:
-            return digest_file(item.full_path, self.throttle, self.stop)
+            read = read_file(
+                item.full_path,
+                item.size,
+                extension(item.path),
+                throttle=self.throttle,
+                stop=self.stop,
+                **self.read_options,
+            )
+            ctx = FileContext(
+                path=item.path,
+                full_path=item.full_path,
+                size=item.size,
+                extension=extension(item.path),
+                mime=read.mime,
+                magic=read.magic,
+                mode=read.mode,
+                data=read.data,
+                head=read.head,
+                tail=read.tail,
+                throttle=self.throttle,
+            )
+            return Scanned(read, self.pipeline.scan(ctx))
         except (Stopped, OSError) as exc:
             return exc
+
+    def _record_findings(
+        self, session: Session, run_id: int, file_id: int, result: ScanResult, now: datetime
+    ) -> None:
+        """Store this read's findings; drop earlier ones that didn't come back, except from
+        engines that couldn't scan this time."""
+        for f in result.findings:
+            stmt = insert(Detection).values(
+                file_id=file_id,
+                engine=f.engine,
+                name=f.name[:500],
+                member=f.member[:1000],
+                severity=f.severity,
+                description=f.description[:2000],
+                details=f.details,
+                run_id=run_id,
+                first_seen=now,
+                last_seen=now,
+            )
+            session.execute(
+                stmt.on_conflict_do_update(
+                    index_elements=["file_id", "engine", "name", "member"],
+                    set_={
+                        k: stmt.excluded[k]
+                        for k in ("severity", "description", "details", "run_id", "last_seen")
+                    },
+                )
+            )
+        stale = delete(Detection).where(Detection.file_id == file_id, Detection.last_seen < now)
+        if result.errors:
+            stale = stale.where(Detection.engine.not_in(list(result.errors)))
+        session.execute(stale)
 
     def _upsert(
         self,
         session: Session,
         run_id: int,
         item: FoundFile,
-        digest: FileDigest | None,
+        read: ReadResult | None,
         now: datetime,
         error: str | None = None,
-    ) -> None:
+    ) -> int:
+        digest = read.digest if read else None
         values = {
             "path": item.path,
             "extension": extension(item.path),
@@ -255,24 +353,27 @@ class Crawler:
             "mtime_ns": item.mtime_ns,
             "inode": item.inode,
             "device": item.device,
-            "mime": digest.mime if digest else None,
-            "magic": digest.magic if digest else None,
+            "mime": read.mime if read else None,
+            "magic": read.magic if read else None,
             "sha256": digest.sha256 if digest else None,
             "sha1": digest.sha1 if digest else None,
             "md5": digest.md5 if digest else None,
+            "scan_mode": ("partial" if read.digest is None else "full") if read else None,
             "status": "error" if error else "active",
             "error": error[:2000] if error else None,
             "first_seen": now,
             "last_seen": now,
-            "last_scanned": now if digest else None,
+            "last_scanned": now if read else None,
             "removed_at": None,
             "last_seen_run_id": run_id,
         }
         stmt = insert(File).values(**values)
         update_cols = {k: stmt.excluded[k] for k in values if k not in ("path", "first_seen")}
-        if not digest:
+        if not read:
             update_cols.pop("last_scanned")  # keep when it was last read successfully
-        session.execute(stmt.on_conflict_do_update(index_elements=["path"], set_=update_cols))
+        return session.scalar(
+            stmt.on_conflict_do_update(index_elements=["path"], set_=update_cols).returning(File.id)
+        )
 
     def _progress(self, session: Session, run_id: int, counts: Counts, current: str | None) -> None:
         """Totals so far: what the run had when this execution began, plus this execution."""
@@ -289,6 +390,8 @@ class Crawler:
                 bytes_seen=base.bytes_seen + counts.bytes_seen,
                 bytes_hashed=base.bytes_hashed + counts.bytes_hashed,
                 errors=base.errors + counts.errors,
+                files_flagged=base.flagged + counts.flagged,
+                detections=base.detections + counts.detections,
                 last_error=counts.last_error or base.last_error,
                 current_path=current,
                 updated_at=datetime.now(UTC),

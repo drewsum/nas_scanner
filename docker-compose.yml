@@ -8,6 +8,7 @@ x-app: &app
     NASSCAN_DATABASE_URL: postgresql+psycopg://${POSTGRES_USER}:${POSTGRES_PASSWORD}@db:5432/${POSTGRES_DB}
     # In .env, NASSCAN_SCAN_ROOT is the host folder to mount; inside, it's always /scan.
     NASSCAN_SCAN_ROOT: /scan
+    NASSCAN_CLAMD_HOST: clamd
   restart: unless-stopped
 
 services:
@@ -54,6 +55,7 @@ services:
     command: ["nasscan", "scanner"]
     volumes:
       - ${NASSCAN_SCAN_ROOT:-./samples}:/scan:ro
+      - scanner-data:/data
     healthcheck:
       test: ["CMD", "python", "-c", "import os, sys, time; sys.exit(time.time() - os.path.getmtime('/tmp/nasscan-scanner-heartbeat') > 60)"]
       interval: 15s
@@ -63,12 +65,12 @@ services:
       migrate:
         condition: service_completed_successfully
 
-  # ClamAV daemon; the scanner sends it paths under /scan, so it mounts the same folder at the
-  # same place. First start downloads the signatures (a few minutes, ~1 GB of RAM or more).
+  # ClamAV (deploy/clamd: the official image plus unofficial signatures). The scanner streams
+  # files to it, so it needs no access to the data. The first start downloads the signatures
+  # (a few minutes); it uses about 1.5 GB of RAM.
   clamd:
-    image: clamav/clamav:1.4
+    build: ./deploy/clamd
     volumes:
-      - ${NASSCAN_SCAN_ROOT:-./samples}:/scan:ro
       - clamav-db:/var/lib/clamav
     restart: unless-stopped
 
@@ -91,4 +93,5 @@ services:
 volumes:
   db-data:
   clamav-db:
+  scanner-data:
   web-node-modules:

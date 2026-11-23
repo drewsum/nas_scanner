@@ -11,11 +11,17 @@ from nasscan.scanner.base import Source
 from nasscan.scanner.priority import lower_priority
 from nasscan.scanner.runner import ScanRunnerSource
 from nasscan.scanner.schedule import ScheduleSource, next_run
+from nasscan.scanner.status import EngineStatusSource, YaraUpdateSource
 
 log = logging.getLogger(__name__)
 
 # Background tasks register here as milestones land (M1 crawler, M2 engines, M3 feeds, ...).
-SOURCE_TYPES: list[type[Source]] = [ScheduleSource, ScanRunnerSource]
+SOURCE_TYPES: list[type[Source]] = [
+    ScheduleSource,
+    ScanRunnerSource,
+    YaraUpdateSource,
+    EngineStatusSource,
+]
 
 
 async def _loop(source: Source, stop: asyncio.Event) -> None:

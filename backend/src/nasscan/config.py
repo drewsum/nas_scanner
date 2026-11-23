@@ -45,6 +45,41 @@ class Settings(BaseSettings):
     scanner_nice: int = Field(default=10, ge=0, le=19)
     scanner_ionice_idle: bool = True
 
+    # Reading files for the engines. Files up to memory_read_mb are read once into memory and
+    # every engine scans that copy. Media files (by name and real type) over large_file_mb are
+    # not read whole: only their first and last partial_chunk_mb, so a 50 GB movie costs a few
+    # MB (and gets no hashes). large_media_full_read reads them whole anyway.
+    memory_read_mb: int = Field(default=64, ge=1, le=1024)
+    large_file_mb: int = Field(default=512, ge=16)
+    partial_chunk_mb: int = Field(default=16, ge=1, le=256)
+    large_media_full_read: bool = False
+    # Folder names that hold media or documents, where executables and scripts are suspicious
+    # (matched case-insensitively against every folder in a file's path).
+    media_folders: str = (
+        "movies,movie,films,film,tv,shows,series,music,audio,videos,video,photos,pictures,"
+        "images,media,documents,docs,books,ebooks,3d,3dprints,prints,printing,stl"
+    )
+    # Content embedded in container files (a 3MF's members) scanned per file, in MB.
+    embedded_max_mb: int = Field(default=256, ge=1)
+
+    # ClamAV daemon (the stack's clamd service). Unset: no ClamAV.
+    clamd_host: str | None = None
+    clamd_port: int = Field(default=3310, ge=1, le=65535)
+    clamd_timeout: float = Field(default=300.0, gt=0)
+    # The most streamed to clamd at once, in MB. Must not exceed clamd's StreamMaxLength
+    # (the compose files set it to 512M); bigger files are scanned in head and tail pieces.
+    clamd_stream_max_mb: int = Field(default=400, ge=1)
+
+    # YARA rule sets downloaded and compiled daily: forge-core, forge-extended, forge-full
+    # (YARA Forge packages, which already include most of signature-base) and signature-base
+    # (Neo23x0's own repo). Comma separated; empty turns downloads off.
+    yara_sources: str = "forge-core"
+    yara_refresh_hours: float = Field(default=24.0, ge=1)
+    # Your own .yar/.yara rules, compiled in too (mount a folder here).
+    yara_local_dir: str = "/rules"
+    # Where downloaded rules and other scanner state live (a volume).
+    data_dir: str = "/data"
+
     # Password for the web UI and API. Unset leaves both open to anyone on the LAN.
     admin_password: SecretStr | None = None
     session_days: float = Field(default=30.0, gt=0)
@@ -77,6 +112,14 @@ class Settings(BaseSettings):
         if not croniter.is_valid(value):
             raise ValueError(f"not a valid cron expression: {value!r}")
         return value
+
+    @property
+    def media_folder_names(self) -> set[str]:
+        return {p.strip().lower() for p in self.media_folders.split(",") if p.strip()}
+
+    @property
+    def yara_source_names(self) -> list[str]:
+        return [p.strip() for p in self.yara_sources.split(",") if p.strip()]
 
     @property
     def exclude_patterns(self) -> list[str]:

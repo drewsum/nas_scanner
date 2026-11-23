@@ -19,6 +19,16 @@ x-nasscan-env: &nasscan-env
   NASSCAN_MAX_READ_MBPS: ${NASSCAN_MAX_READ_MBPS:-}
   NASSCAN_SCANNER_NICE: ${NASSCAN_SCANNER_NICE:-}
   NASSCAN_SCANNER_IONICE_IDLE: ${NASSCAN_SCANNER_IONICE_IDLE:-}
+  NASSCAN_MEMORY_READ_MB: ${NASSCAN_MEMORY_READ_MB:-}
+  NASSCAN_LARGE_FILE_MB: ${NASSCAN_LARGE_FILE_MB:-}
+  NASSCAN_PARTIAL_CHUNK_MB: ${NASSCAN_PARTIAL_CHUNK_MB:-}
+  NASSCAN_LARGE_MEDIA_FULL_READ: ${NASSCAN_LARGE_MEDIA_FULL_READ:-}
+  NASSCAN_MEDIA_FOLDERS: ${NASSCAN_MEDIA_FOLDERS:-}
+  NASSCAN_EMBEDDED_MAX_MB: ${NASSCAN_EMBEDDED_MAX_MB:-}
+  NASSCAN_CLAMD_HOST: ${NASSCAN_CLAMD_HOST:-clamd}
+  NASSCAN_CLAMD_STREAM_MAX_MB: ${NASSCAN_CLAMD_STREAM_MAX_MB:-}
+  NASSCAN_YARA_SOURCES: ${NASSCAN_YARA_SOURCES:-}
+  NASSCAN_YARA_REFRESH_HOURS: ${NASSCAN_YARA_REFRESH_HOURS:-}
   NASSCAN_ADMIN_PASSWORD: ${NASSCAN_ADMIN_PASSWORD:-}
   NASSCAN_SESSION_DAYS: ${NASSCAN_SESSION_DAYS:-}
   NASSCAN_TRUSTED_PROXIES: ${NASSCAN_TRUSTED_PROXIES:-}
@@ -96,6 +106,8 @@ services:
     # The NAS data, read-only: the scanner reports and never changes a file.
     volumes:
       - ${NASSCAN_SCAN_ROOT:?set NASSCAN_SCAN_ROOT to the dataset path to scan}:/scan:ro
+      # Downloaded YARA rules, kept across restarts and image updates.
+      - scanner-data:/data
     healthcheck:
       test: ["CMD", "python", "-c", "import os, sys, time; sys.exit(time.time() - os.path.getmtime('/tmp/nasscan-scanner-heartbeat') > 60)"]
       interval: 15s
@@ -104,6 +116,36 @@ services:
     depends_on:
       migrate:
         condition: service_completed_successfully
+
+  # ClamAV (deploy/clamd: the official image plus fangfrisch's unofficial signatures). The
+  # scanner streams files to it over the stack's network, so it has no access to the data.
+  # The first start downloads ~300 MB of signatures; it needs about 1.5 GB of RAM.
+  clamd:
+    # Rewritten by .github/workflows/release.yml with the app image; keep it on one line.
+    image: ${NASSCAN_CLAMD_IMAGE:-ghcr.io/drewsum/nas_scanner:clamd-latest}
+    environment:
+      FANGFRISCH_SANESECURITY: ${FANGFRISCH_SANESECURITY:-yes}
+      FANGFRISCH_URLHAUS: ${FANGFRISCH_URLHAUS:-no}
+      FANGFRISCH_MALWAREPATROL_RECEIPT: ${FANGFRISCH_MALWAREPATROL_RECEIPT:-}
+      FANGFRISCH_SECURITEINFO_CUSTOMER_ID: ${FANGFRISCH_SECURITEINFO_CUSTOMER_ID:-}
+      TZ: ${TZ:-UTC}
+    volumes:
+      - clamav-db:/var/lib/clamav
+    # The image's init runs as root to prepare its folders and logs for the clamav user, then
+    # freshclam and clamd drop to that user. These are the capabilities that takes; the
+    # container has no access to the NAS data.
+    cap_drop: [ALL]
+    cap_add: [CHOWN, DAC_OVERRIDE, FOWNER, SETUID, SETGID]
+    healthcheck:
+      test: ["CMD", "clamdcheck.sh"]
+      interval: 60s
+      timeout: 10s
+      retries: 3
+      # The first signature download can take a while.
+      start_period: 15m
+    restart: unless-stopped
+    logging: *logging
+    mem_limit: ${NASSCAN_CLAMD_MEMORY_LIMIT:-3g}
 
   # A pg_dump every NASSCAN_BACKUP_INTERVAL_HOURS into <NASSCAN_DATA_DIR>/backups. Starts as
   # root only to hand that directory to the nasscan user, then runs as it; CHOWN, SETUID and
@@ -123,3 +165,7 @@ services:
     depends_on:
       migrate:
         condition: service_completed_successfully
+
+volumes:
+  scanner-data:
+  clamav-db:

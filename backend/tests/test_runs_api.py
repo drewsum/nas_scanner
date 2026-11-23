@@ -13,7 +13,7 @@ pytestmark = pytest.mark.db
 def client(db_env):
     main(["migrate"])
     with get_sessionmaker()() as s:
-        s.execute(text("TRUNCATE files, scan_runs RESTART IDENTITY CASCADE"))
+        s.execute(text("TRUNCATE files, scan_runs, engine_status RESTART IDENTITY CASCADE"))
         s.commit()
     return TestClient(create_app())
 
@@ -45,3 +45,29 @@ def test_scan_cli_queues_a_run(client, capsys):
     assert "Queued path scan" in capsys.readouterr().out
     with pytest.raises(SystemExit, match="already queued"):
         main(["scan"])
+
+
+def test_engines_and_detections(client):
+    from datetime import UTC, datetime
+
+    from nasscan.db.models import Detection, EngineStatus, File
+
+    now = datetime.now(UTC)
+    with get_sessionmaker()() as s:
+        f = File(path="a/x.exe", size=1, mtime_ns=1, inode=1, device=1, first_seen=now,
+                 last_seen=now)  # fmt: skip
+        gone = File(path="b/y.exe", size=1, mtime_ns=1, inode=2, device=1, first_seen=now,
+                    last_seen=now, status="removed")  # fmt: skip
+        s.add_all([f, gone])
+        s.flush()
+        for file_id, name, sev in [(f.id, "info_one", "info"), (f.id, "bad", "malicious"),
+                                   (gone.id, "old", "malicious")]:  # fmt: skip
+            s.add(Detection(file_id=file_id, engine="clamav", name=name, severity=sev,
+                            first_seen=now, last_seen=now))  # fmt: skip
+        s.add(EngineStatus(name="clamav", status="ok", message="fine", checked_at=now))
+        s.commit()
+    rows = client.get("/api/detections").json()
+    assert [(r["path"], r["name"]) for r in rows] == [("a/x.exe", "bad"), ("a/x.exe", "info_one")]
+    assert len(client.get("/api/detections?include_removed=true").json()) == 3
+    assert [r["name"] for r in client.get("/api/detections?severity=info").json()] == ["info_one"]
+    assert client.get("/api/engines").json()[0]["name"] == "clamav"

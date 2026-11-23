@@ -38,7 +38,9 @@ ENV NASSCAN_WEB_DIST_DIR=/app/web-dist
 ARG GIT_SHA=dev
 ENV NASSCAN_GIT_SHA=$GIT_SHA
 
-RUN useradd --system --uid 10001 nasscan
+# /data holds downloaded YARA rules (compose mounts a volume, which takes this ownership when
+# it's first created); /rules is where your own YARA rules can be mounted.
+RUN useradd --system --uid 10001 nasscan && mkdir /data /rules && chown nasscan /data
 USER nasscan
 EXPOSE 8000
 CMD ["nasscan", "api"]

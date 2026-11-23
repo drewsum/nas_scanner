@@ -6,6 +6,7 @@ import logging
 import sys
 import threading
 import time
+from collections import deque
 from dataclasses import dataclass
 
 log = logging.getLogger(__name__)
@@ -120,3 +121,97 @@ def digest_file(
             size += len(chunk)
     mime, desc = detect_type(head)
     return FileDigest(sha256.hexdigest(), sha1.hexdigest(), md5.hexdigest(), size, mime, desc)
+
+
+@dataclass
+class ReadResult:
+    """One read of a file: its hashes (None for a partial read) and what the engines scan."""
+
+    digest: FileDigest | None
+    mime: str | None
+    magic: str | None
+    mode: str  # memory | file | partial (see engines.base)
+    data: bytes | None
+    head: bytes
+    tail: bytes
+    bytes_read: int
+
+
+def read_file(
+    path: bytes | str,
+    size: int,
+    extension: str | None,
+    *,
+    memory_limit: int,
+    large_limit: int,
+    piece: int,
+    full_media: bool = False,
+    throttle: Throttle | None = None,
+    stop: threading.Event | None = None,
+) -> ReadResult:
+    """Read a file for scanning, once.
+
+    A large media file (bigger than ``large_limit``, named like media and really media by
+    libmagic) gets only its first and last ``piece`` bytes read, and no hashes. Anything
+    else is read whole and hashed; files up to ``memory_limit`` are kept in memory for the
+    engines, bigger ones keep their first and last ``piece`` bytes.
+    """
+    from nasscan.scanner.engines.base import FILE, MEMORY, PARTIAL
+    from nasscan.scanner.engines.types import is_media
+
+    def check_stop() -> None:
+        if stop is not None and stop.is_set():
+            raise Stopped
+
+    def take(f, n: int) -> bytes:
+        out = bytearray()
+        while len(out) < n:
+            check_stop()
+            block = f.read(min(CHUNK, n - len(out)))
+            if not block:
+                break
+            if throttle:
+                throttle.consume(len(block))
+            out += block
+        return bytes(out)
+
+    with open(path, "rb", buffering=0) as f:
+        first = take(f, CHUNK)
+        mime, desc = detect_type(first[:MAGIC_BYTES])
+
+        if size > large_limit and not full_media and is_media(extension, mime):
+            head = first[:piece] if len(first) >= piece else first + take(f, piece - len(first))
+            f.seek(max(len(head), size - piece))
+            tail = take(f, piece)
+            return ReadResult(None, mime, desc, PARTIAL, None, head, tail, len(head) + len(tail))
+
+        sha256, sha1, md5 = hashlib.sha256(), hashlib.sha1(), hashlib.md5()
+        keep: list[bytes] | None = []  # the whole file, while it fits in memory_limit
+        head = bytearray()
+        tail: deque[bytes] = deque()
+        tail_len = 0
+        total = 0
+        block = first
+        while block:
+            sha256.update(block)
+            sha1.update(block)
+            md5.update(block)
+            total += len(block)
+            if keep is not None:
+                keep.append(block)
+                if total > memory_limit:
+                    keep = None
+            if len(head) < piece:
+                head += block[: piece - len(head)]
+            tail.append(block)
+            tail_len += len(block)
+            while tail_len - len(tail[0]) >= piece:
+                tail_len -= len(tail.popleft())
+            block = take(f, CHUNK)
+
+    digest = FileDigest(sha256.hexdigest(), sha1.hexdigest(), md5.hexdigest(), total, mime, desc)
+    if keep is not None:
+        data = b"".join(keep)
+        return ReadResult(digest, mime, desc, MEMORY, data, data[:piece], b"", total)
+    tail_bytes = b"".join(tail)[-piece:]
+    return ReadResult(digest, mime, desc, FILE, None, bytes(head), tail_bytes, total)
