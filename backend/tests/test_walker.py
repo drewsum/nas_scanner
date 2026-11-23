@@ -3,7 +3,7 @@ import sys
 
 import pytest
 
-from nasscan.scanner.walker import Excluder, FoundFile, WalkError, walk
+from nasscan.scanner.walker import Excluder, FoundFile, WalkError, storable, walk
 
 posix_only = pytest.mark.skipif(sys.platform == "win32", reason="POSIX filesystem features")
 
@@ -118,3 +118,10 @@ def test_deep_and_wide_trees_stream(tmp_path):
     assert next(gen).path == "f000"  # a generator: files come out as folders are listed
     rest = paths(gen)
     assert len(rest) == 300 and rest[-1].endswith("/d59/leaf")
+
+
+def test_out_of_range_timestamps_are_clamped_to_bigint():
+    # Seen on a real NAS: a crash log whose mtime reads as the year 1601.
+    assert storable(-11622159270858821800) == -(2**63)
+    assert storable(2**64) == 2**63 - 1
+    assert storable(1_700_000_000_000_000_000) == 1_700_000_000_000_000_000
